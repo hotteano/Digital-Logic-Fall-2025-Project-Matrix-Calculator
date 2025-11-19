@@ -16,7 +16,8 @@ module matrix_calculator_top_optimized (
     output wire uart_tx,
     output wire [6:0] seg_display,
     output wire [3:0] led_status,
-    output wire seg_select
+    output wire seg_select,
+    output wire [6:0] seg_display_subtype
 );
 
 assign seg_select = 1'b1;
@@ -491,6 +492,7 @@ display_ctrl disp_ctrl_inst (
     .error_timer(error_timer[25:20]),
     .seg_display(seg_display),
     .led_status(led_status)
+    .seg_display_subtype(seg_display_subtype)
 );
 
 endmodule

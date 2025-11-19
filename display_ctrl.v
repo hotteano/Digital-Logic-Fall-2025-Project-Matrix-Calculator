@@ -18,7 +18,8 @@ module display_ctrl (
     
     // Display outputs
     output reg [6:0] seg_display,
-    output reg [3:0] led_status
+    output reg [3:0] led_status,
+    output reg [6:0] seg_display_subtype, // 新增：显示计算模式子类型的七段数码管
 );
 
 // 7-segment display encoding (common cathode)
@@ -78,6 +79,29 @@ always @(posedge clk or negedge rst_n) begin
         
         // LED[3]: Heartbeat (toggles periodically)
         led_status[3] <= error_timer[4];
+    end
+end
+
+// ========================================
+// Subtype Display Logic (op_type)
+// ========================================
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        seg_display_subtype <= SEG_OFF;
+    end else begin
+        case (op_type)
+            4'd0: seg_display_subtype <= SEG_0;
+            4'd1: seg_display_subtype <= SEG_1;
+            4'd2: seg_display_subtype <= SEG_2;
+            4'd3: seg_display_subtype <= SEG_3;
+            4'd4: seg_display_subtype <= SEG_4;
+            4'd5: seg_display_subtype <= SEG_5;
+            4'd6: seg_display_subtype <= SEG_6;
+            4'd7: seg_display_subtype <= SEG_7;
+            4'd8: seg_display_subtype <= SEG_8;
+            4'd9: seg_display_subtype <= SEG_9;
+            default: seg_display_subtype <= SEG_OFF;
+        endcase
     end
 end
 
