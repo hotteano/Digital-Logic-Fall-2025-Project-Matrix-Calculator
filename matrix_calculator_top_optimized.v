@@ -10,56 +10,48 @@ module matrix_calculator_top_optimized (
     input wire clk,
     input wire rst_n,
     input wire [2:0] dip_sw,
-    input wire btn_confirm,  // ç‰©ç†æŒ‰é”®
-    input wire btn_back,     // ç‰©ç†æŒ‰é”®
+    input wire btn_confirm,  // ÎïÀí°´¼ü
+    input wire btn_back,     // ÎïÀí°´¼ü
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display, // æ³¨æ„ï¼šdisplay_ctrl å†…éƒ¨é©±åŠ¨ï¼Œè¿™ï¿½??? wire å³å¯
+    output wire [6:0] seg_display, // ×¢Òâ£ºdisplay_ctrl ÄÚ²¿Çı¶¯£¬Õâ?1?7??? wire ¼´¿É
     output wire [3:0] led_status,
     output wire [1:0] seg_select
 );
 
     // ========================================
-    // 1. æŒ‰é”®æ¶ˆæŠ– (Debouncing) - æ ¸å¿ƒä¿®å¤
+    // 1. °´¼üÏû¶¶ (Debouncing) - ºËĞÄĞŞ¸´
     // ========================================
-    wire btn_confirm_active_high;
-    wire btn_back_active_high;
-    
-    assign btn_confirm_active_high = ~btn_confirm; // <--- å…³é”®ä¿®å¤ï¿½??
-    assign btn_back_active_high    = ~btn_back;    // <--- å…³é”®ä¿®å¤ï¿½??
-
-    wire btn_confirm_db;
     wire btn_back_db;
-    
-    // åªæœ‰ï¿½??æµ‹åˆ°æ¶ˆæŠ–åçš„ä¿¡å·çš„ä¸Šå‡æ²¿ (posedge) æ‰è§†ä¸ºä¸€æ¬¡è§¦ï¿½??
+    wire btn_confirm_db;
+    // Âö³å¼ì²âĞÅºÅ
     wire btn_confirm_pulse; 
     wire btn_back_pulse;
     reg btn_confirm_r, btn_back_r;
 
-    // [ä¿®æ”¹] æ­¥éª¤ 1: ä¼ å…¥å–ååçš„ä¿¡å· (_active_high)
+    // Ïû¶¶Ä£¿é£ºÖ±½Ó´«ÈëÔ­Ê¼°´¼üĞÅºÅ
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
-        .btn_in(btn_confirm_active_high), // <--- æ³¨æ„è¿™é‡Œæ”¹äº†å˜é‡ï¿½??
+        .btn_in(btn_confirm),  // Ô­Ê¼°´¼üĞÅºÅ£¨ÓĞÉÏÀ­£¬°´ÏÂÊ±Îª0£©
         .btn_out(btn_confirm_db)
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
-        .btn_in(btn_back_active_high),    // <--- æ³¨æ„è¿™é‡Œæ”¹äº†å˜é‡ï¿½??
+        .btn_in(btn_back),     // Ô­Ê¼°´¼üĞÅºÅ
         .btn_out(btn_back_db)
     );
 
-    // [ä¿æŒ] æ­¥éª¤ 2: è¾¹æ²¿ï¿½??ï¿½?? (è¿™éƒ¨åˆ†ä½ çš„ä»£ç å·²ç»æ˜¯ä¿®å¤è¿‡çš„ï¼Œä¸ç”¨åŠ¨)
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            btn_confirm_r <= 1'b0;
-            btn_back_r    <= 1'b0;
+            btn_confirm_r <= 1'b1;  
+            btn_back_r    <= 1'b1;
         end else begin
             btn_confirm_r <= btn_confirm_db;
             btn_back_r    <= btn_back_db;
         end
     end
-    assign btn_confirm_pulse = btn_confirm_db & ~btn_confirm_r;
-    assign btn_back_pulse    = btn_back_db    & ~btn_back_r;
+    assign btn_confirm_pulse = ~btn_confirm_db & btn_confirm_r;  // ÏÂ½µÑØ£º´Ó1±ä0
+    assign btn_back_pulse    = ~btn_back_db    & btn_back_r;    // ÏÂ½µÑØ£º´Ó1±ä0
     // ========================================
     // Main State Machine
     // ========================================
@@ -220,13 +212,13 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
                         3'd3: main_state_next = `MODE_DISPLAY;
                         3'd4: main_state_next = `MODE_COMPUTE;
                         3'd5: main_state_next = `MODE_SETTING;
-                        // å»ºè®®ï¼šè¿™é‡Œå¯ä»¥ä¸åšä»»ä½•äº‹ï¼Œæˆ–è€…è®©é”™è¯¯LEDé—ªçƒï¿½??ä¸‹æç¤ºç”¨æˆ·æ²¡æ‹¨å¼€ï¿½??
+                        // ½¨Òé£ºÕâÀï¿ÉÒÔ²»×öÈÎºÎÊÂ£¬»òÕßÈÃ´íÎóLEDÉÁË¸?1?7??ÏÂÌáÊ¾ÓÃ»§Ã»²¦¿ª?1?7??
                         default: main_state_next = `MAIN_MENU; 
                     endcase
                 end
             end
             
-            default: begin // åœ¨ä»»ä½•å­æ¨¡å¼ï¿½??
+            default: begin // ÔÚÈÎºÎ×ÓÄ£Ê½?1?7??
                 if (btn_back_pulse) begin
                     main_state_next = `MAIN_MENU;
                 end
@@ -461,9 +453,9 @@ compute_mode compute_mode_inst (
         .mode_active(compute_mode_active),
         .config_max_dim(config_max_dim),
         
-        // ä¼ å…¥æ¶ˆæŠ–åçš„è„‰å†²ä¿¡å·ï¼Œï¿½?ï¿½ä¸æ˜¯åŸå§‹æŒ‰é”®ï¼
+        // ´«ÈëÏû¶¶ºóµÄÂö³åĞÅºÅ£¬?1?7??1?7²»ÊÇÔ­Ê¼°´¼ü£¡
         .dip_sw(dip_sw),               
-        .btn_confirm(btn_confirm_pulse), // fix: ä½¿ç”¨è„‰å†²ä¿¡å·
+        .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
         .selected_op_type(op_type_from_compute), 
         
         .rx_data(rx_data),
@@ -517,14 +509,14 @@ display_ctrl disp_ctrl_inst (
         .main_state(main_state),
         .sub_state(sub_state),
         
-        // å¦‚æœï¿½??? Compute æ¨¡å¼ï¼Œä¼ ï¿½??? op_typeï¼Œå¦åˆ™ä¸º 0
+        // Èç¹û?1?7??? Compute Ä£Ê½£¬´«?1?7??? op_type£¬·ñÔòÎª 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         
         .error_code(error_code),
         .error_timer(error_timer[25:20]),
-        .seg_display(seg_display), // ç›´æ¥è¿æ¥ï¿½??? Output Port
+        .seg_display(seg_display), // Ö±½ÓÁ¬½Ó?1?7??? Output Port
         .led_status(led_status),
-        .seg_select(seg_select)    // ç›´æ¥è¿æ¥ï¿½??? Output Port
+        .seg_select(seg_select)    // Ö±½ÓÁ¬½Ó?1?7??? Output Port
     );
 
 

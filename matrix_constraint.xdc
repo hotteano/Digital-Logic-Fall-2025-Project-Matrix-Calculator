@@ -7,12 +7,14 @@ set_property PACKAGE_PIN R1 [get_ports {dip_sw[0]}]
 set_property PACKAGE_PIN N4 [get_ports {dip_sw[1]}]
 set_property PACKAGE_PIN M4 [get_ports {dip_sw[2]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {dip_sw[*]}]
+
 set_property PACKAGE_PIN R15 [get_ports btn_confirm]
 set_property IOSTANDARD LVCMOS33 [get_ports btn_confirm]
 set_property PULLUP true [get_ports btn_confirm]
 set_property PACKAGE_PIN V1 [get_ports btn_back]
 set_property IOSTANDARD LVCMOS33 [get_ports btn_back]
 set_property PULLUP true [get_ports btn_back]
+
 set_property PACKAGE_PIN N5 [get_ports uart_rx]
 set_property PACKAGE_PIN T4 [get_ports uart_tx]
 set_property IOSTANDARD LVCMOS33 [get_ports {uart_rx uart_tx}]
@@ -33,12 +35,14 @@ set_property PACKAGE_PIN J3 [get_ports {led_status[1]}]
 set_property PACKAGE_PIN J2 [get_ports {led_status[2]}]
 set_property PACKAGE_PIN K2 [get_ports {led_status[3]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led_status[*]}]
-create_clock -period 10.000 -name sys_clk [get_ports clk]
-set_false_path -from [get_ports {rst_n btn_confirm btn_back dip_sw[*]}]
-set_false_path -to [get_ports {seg_display[*] seg_select led_status[*]}]
+
+create_clock -period 50.000 -name sys_clk [get_ports clk]
+
 set_false_path -from [get_ports uart_rx]
 set_false_path -to [get_ports uart_tx]
+
 set_property CFGBVS VCCO [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]
 set_property RAM_STYLE block [get_cells -hierarchical *mem*]
 set_property RAM_STYLE block [get_cells -hierarchical *matrix_*]
+
