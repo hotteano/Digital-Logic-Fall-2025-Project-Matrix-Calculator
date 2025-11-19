@@ -18,7 +18,8 @@ module display_ctrl (
     
     // Display outputs
     output reg [6:0] seg_display,
-    output reg [3:0] led_status
+    output reg [3:0] led_status,
+    output reg [6:0] seg_display_subtype // 新增：显示计算模式子类型的七段数码管
 );
 
 // 7-segment display encoding (common cathode)
@@ -54,6 +55,23 @@ always @(posedge clk or negedge rst_n) begin
             3'd4: seg_display <= SEG_4;  // MODE_COMPUTE
             3'd5: seg_display <= SEG_5;  // MODE_SETTING
             default: seg_display <= SEG_OFF;
+        endcase
+    end
+end
+
+// Display sub state on 7-segment
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        seg_display <= SEG_0;
+    end else begin
+        case (main_state)
+            3'd0: seg_display <= SEG_0;  // mode1
+            3'd1: seg_display <= SEG_1;  // mode2
+            3'd2: seg_display <= SEG_2;  // mode3
+            3'd3: seg_display <= SEG_3;  // mode4
+            3'd4: seg_display <= SEG_4;  // mode5
+            3'd5: seg_display <= SEG_5;  // mode6
+            default: seg_display <= SEG_OFF; // No signal
         endcase
     end
 end
