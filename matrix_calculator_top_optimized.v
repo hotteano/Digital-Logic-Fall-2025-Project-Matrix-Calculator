@@ -25,20 +25,22 @@ module matrix_calculator_top_optimized (
     wire btn_back_db;
     wire btn_confirm_db;
     // 脉冲检测信号
-    wire btn_confirm_pulse; 
-    wire btn_back_pulse;
+    (* DONT_TOUCH = "true" *) wire btn_confirm_pulse; 
+    (* DONT_TOUCH = "true" *) wire btn_back_pulse;
     reg btn_confirm_r, btn_back_r;
 
     // 消抖模块：直接传入原始按键信号
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_confirm),  // 原始按键信号（有上拉，按下时为0）
-        .btn_out(btn_confirm_db)
+        .btn_out(btn_confirm_db),
+        .btn_pulse(btn_confirm_pulse) // 新增脉冲输出
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_back),     // 原始按键信号
-        .btn_out(btn_back_db)
+        .btn_out(btn_back_db),
+        .btn_pulse(btn_back_pulse) // 新增脉冲输出
     );
 
     always @(posedge clk or negedge rst_n) begin
@@ -50,8 +52,7 @@ module matrix_calculator_top_optimized (
             btn_back_r    <= btn_back_db;
         end
     end
-    assign btn_confirm_pulse = ~btn_confirm_db & btn_confirm_r;  // 下降沿：从1变0
-    assign btn_back_pulse    = ~btn_back_db    & btn_back_r;    // 下降沿：从1变0
+
     // ========================================
     // Main State Machine
     // ========================================
