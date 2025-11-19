@@ -51,10 +51,6 @@
 
 ### 配置和工具
 - **matrix_pkg.vh** - 系统参数和常量定义包
-- **parse_utils.vh** - 数据解析工具函数
-- **syntax_check.ps1** - Verilog语法检查脚本
-- **create_project.tcl** - Vivado项目创建脚本
-- **RESTRUCTURE_GUIDE.md** - 详细重构指南
 
 ## 关键改进
 
@@ -278,15 +274,7 @@ report_utilization -file bram_utilization.txt
 
 ## 许可证
 
-本重构基于原项目，继承原许可证。
-
-## 联系和反馈
-
-如发现问题或有改进建议，请：
-1. 检查RESTRUCTURE_GUIDE.md中的故障排除章节
-2. 验证文件完整性和语法
-3. 检查Vivado消息和警告
-4. 参考EGO1开发板用户手册
+本项目采用MIT协议。
 
 ---
 
@@ -295,3 +283,4 @@ report_utilization -file bram_utilization.txt
 **Vivado版本**：2017  
 **Verilog标准**：IEEE 1364-2005  
 **状态**：✓ 语法验证通过，可用于综合  
+
