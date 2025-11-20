@@ -10,32 +10,32 @@ module matrix_calculator_top_optimized (
     input wire clk,
     input wire rst_n,
     input wire [2:0] dip_sw,
-    input wire btn_confirm,  // ÎïÀí°´¼ü
-    input wire btn_back,     // ÎïÀí°´¼ü
+    input wire btn_confirm,  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    input wire btn_back,     // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display, // ×¢Òâ£ºdisplay_ctrl ÄÚ²¿Çý¶¯£¬Õâ?1?7??? wire ¼´¿É
+    output wire [6:0] seg_display, // ×¢ï¿½â£ºdisplay_ctrl ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½?1?7??? wire ï¿½ï¿½ï¿½ï¿½
     output wire [3:0] led_status,
     output wire [1:0] seg_select
 );
 
     // ========================================
-    // 1. °´¼üÏû¶¶ (Debouncing) - ºËÐÄÐÞ¸´
+    // 1. ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (Debouncing) - ï¿½ï¿½ï¿½ï¿½ï¿½Þ¸ï¿½
     // ========================================
-    // Âö³å¼ì²âÐÅºÅ
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½
     (* DONT_TOUCH = "true" *) wire btn_confirm_pulse; 
     (* DONT_TOUCH = "true" *) wire btn_back_pulse;
 
-    // Ïû¶¶Ä£¿é£ºÖ±½Ó´«ÈëÔ­Ê¼°´¼üÐÅºÅ
+    // ï¿½ï¿½ï¿½ï¿½Ä£ï¿½é£ºÖ±ï¿½Ó´ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
-        .btn_in(btn_confirm),  // Ô­Ê¼°´¼üÐÅºÅ£¨ÓÐÉÏÀ­£¬°´ÏÂÊ±Îª0£©
-        .btn_pulse(btn_confirm_pulse) // ÐÂÔöÂö³åÊä³ö
+        .btn_in(btn_confirm),  // Ô­Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ÅºÅ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±Îª0ï¿½ï¿½
+        .btn_pulse(btn_confirm_pulse) // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
-        .btn_in(btn_back),     // Ô­Ê¼°´¼üÐÅºÅ
-        .btn_pulse(btn_back_pulse) // ÐÂÔöÂö³åÊä³ö
+        .btn_in(btn_back),     // Ô­Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½
+        .btn_pulse(btn_back_pulse) // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     );
 
     // ========================================
@@ -457,7 +457,7 @@ compute_mode compute_mode_inst (
         .mode_active(compute_mode_active),
         .config_max_dim(config_max_dim),
         
-        // ´«ÈëÏû¶¶ºóµÄÂö³åÐÅºÅ£¬?1?7??1?7²»ÊÇÔ­Ê¼°´¼ü£¡
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÅºÅ£ï¿½?1?7??1?7ï¿½ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         .dip_sw(dip_sw),               
         .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
         .selected_op_type(op_type_from_compute), 
@@ -512,13 +512,13 @@ display_ctrl disp_ctrl_inst (
         .rst_n(rst_n),
         .main_state(main_state),
         .sub_state(sub_state),
-        // Èç¹û?1?7??? Compute Ä£Ê½£¬´«?1?7??? op_type£¬·ñÔòÎª 0
+        // ï¿½ï¿½ï¿½?1?7??? Compute Ä£Ê½ï¿½ï¿½ï¿½ï¿½?1?7??? op_typeï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         .error_code(error_code),
         .error_timer(error_timer[25:20]),
-        .seg_display(seg_display), // Ö±½ÓÁ¬½Ó?1?7??? Output Port
+        .seg_display(seg_display), // Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½?1?7??? Output Port
         .led_status(led_status),
-        .seg_select(seg_select)    // Ö±½ÓÁ¬½Ó?1?7??? Output Port
+        .seg_select(seg_select)    // Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½?1?7??? Output Port
     );
 
 
