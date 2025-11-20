@@ -54,17 +54,32 @@ module matrix_calculator_top_optimized (
 // ========================================
 // Configuration Parameters
 // ========================================
-wire [3:0] config_max_dim, config_max_value, config_matrices_per_size;
+wire [3:0] config_max_dim_from_setting, config_max_value_from_setting, config_matrices_per_size_from_setting;
+
+// Use setting values when in SETTING mode, otherwise use defaults
+reg [3:0] config_max_dim, config_max_value, config_matrices_per_size;
+
+always @(*) begin
+    if (setting_mode_active) begin
+        config_max_dim = config_max_dim_from_setting;
+        config_max_value = config_max_value_from_setting;
+        config_matrices_per_size = config_matrices_per_size_from_setting;
+    end else begin
+        config_max_dim = `DEFAULT_MAX_DIM;
+        config_max_value = `DEFAULT_MAX_VALUE;
+        config_matrices_per_size = `DEFAULT_MATRICES_PER_SIZE;
+    end
+end
 
 // ========================================
 // UART Interface Signals
 // ========================================
 wire [7:0] rx_data;
-wire rx_valid;
+wire rx_done;
 
 wire [7:0] tx_data_mux;
 wire tx_start_mux;
-wire tx_busy;
+wire tx_busy, rx_busy;
 
 // ========================================
 // BRAM Memory Interface Signals
@@ -273,7 +288,7 @@ uart_module #(
     .uart_rx(uart_rx),
     .uart_tx(uart_tx),
     .rx_data(rx_data),
-    .rx_valid(rx_valid),
+    .rx_done(rx_done),
     .tx_data(tx_data_mux),
     .tx_start(tx_start_mux),
     .tx_busy(tx_busy)
@@ -340,6 +355,7 @@ lfsr_rng #(
 // ========================================
 // Input Mode Module
 // ========================================
+
 input_mode input_mode_inst (
     .clk(clk),
     .rst_n(rst_n),
@@ -347,7 +363,7 @@ input_mode input_mode_inst (
     .config_max_dim(config_max_dim),
     .config_max_value(config_max_value),
     .rx_data(rx_data),
-    .rx_valid(rx_valid),
+    .rx_done(rx_done),
     .clear_rx_buffer(clear_rx_input),
     .tx_data(tx_data_input),
     .tx_start(tx_start_input),
@@ -381,7 +397,7 @@ generate_mode generate_mode_inst (
     .config_max_value(config_max_value),
     .random_value(random_value),
     .rx_data(rx_data),
-    .rx_valid(rx_valid),
+    .rx_done(rx_done),
     .clear_rx_buffer(clear_rx_generate),
     .tx_data(tx_data_generate),
     .tx_start(tx_start_generate),
@@ -410,7 +426,7 @@ display_mode display_mode_inst (
     .rst_n(rst_n),
     .mode_active(display_mode_active),
     .rx_data(rx_data),
-    .rx_valid(rx_valid),
+    .rx_done(rx_done),
     .clear_rx_buffer(clear_rx_display),
     .tx_data(tx_data_display),
     .tx_start(tx_start_display),
@@ -444,7 +460,7 @@ compute_mode compute_mode_inst (
         .selected_op_type(op_type_from_compute), 
         
         .rx_data(rx_data),
-        .rx_valid(rx_valid),
+        .rx_done(rx_done),
         .clear_rx_buffer(clear_rx_compute),
         .tx_data(tx_data_compute),
         .tx_start(tx_start_compute),
@@ -471,14 +487,14 @@ setting_mode setting_mode_inst (
     .rst_n(rst_n),
     .mode_active(setting_mode_active),
     .rx_data(rx_data),
-    .rx_valid(rx_valid),
+    .rx_done(rx_done),
     .clear_rx_buffer(clear_rx_setting),
     .tx_data(tx_data_setting),
     .tx_start(tx_start_setting),
     .tx_busy(tx_busy),
-    .config_max_dim(config_max_dim),
-    .config_max_value(config_max_value),
-    .config_matrices_per_size(config_matrices_per_size),
+    .config_max_dim(config_max_dim_from_setting),
+    .config_max_value(config_max_value_from_setting),
+    .config_matrices_per_size(config_matrices_per_size_from_setting),
     .error_code(error_code_setting),
     .sub_state(sub_state_setting)
 );
@@ -493,10 +509,8 @@ display_ctrl disp_ctrl_inst (
         .rst_n(rst_n),
         .main_state(main_state),
         .sub_state(sub_state),
-        
         // 如果?1?7??? Compute 模式，传?1?7??? op_type，否则为 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
-        
         .error_code(error_code),
         .error_timer(error_timer[25:20]),
         .seg_display(seg_display), // 直接连接?1?7??? Output Port

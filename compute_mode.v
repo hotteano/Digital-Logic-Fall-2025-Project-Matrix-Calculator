@@ -21,7 +21,7 @@ module compute_mode #(
     
     // UART interface
     input wire [7:0] rx_data,
-    input wire rx_valid,
+    input wire rx_done,
     output reg clear_rx_buffer,
     output reg [7:0] tx_data,
     output reg tx_start,
