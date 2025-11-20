@@ -54,7 +54,22 @@ module matrix_calculator_top_optimized (
 // ========================================
 // Configuration Parameters
 // ========================================
-wire [3:0] config_max_dim, config_max_value, config_matrices_per_size;
+wire [3:0] config_max_dim_from_setting, config_max_value_from_setting, config_matrices_per_size_from_setting;
+
+// Use setting values when in SETTING mode, otherwise use defaults
+reg [3:0] config_max_dim, config_max_value, config_matrices_per_size;
+
+always @(*) begin
+    if (setting_mode_active) begin
+        config_max_dim = config_max_dim_from_setting;
+        config_max_value = config_max_value_from_setting;
+        config_matrices_per_size = config_matrices_per_size_from_setting;
+    end else begin
+        config_max_dim = `DEFAULT_MAX_DIM;
+        config_max_value = `DEFAULT_MAX_VALUE;
+        config_matrices_per_size = `DEFAULT_MATRICES_PER_SIZE;
+    end
+end
 
 // ========================================
 // UART Interface Signals
@@ -477,9 +492,9 @@ setting_mode setting_mode_inst (
     .tx_data(tx_data_setting),
     .tx_start(tx_start_setting),
     .tx_busy(tx_busy),
-    .config_max_dim(config_max_dim),
-    .config_max_value(config_max_value),
-    .config_matrices_per_size(config_matrices_per_size),
+    .config_max_dim(config_max_dim_from_setting),
+    .config_max_value(config_max_value_from_setting),
+    .config_matrices_per_size(config_matrices_per_size_from_setting),
     .error_code(error_code_setting),
     .sub_state(sub_state_setting)
 );

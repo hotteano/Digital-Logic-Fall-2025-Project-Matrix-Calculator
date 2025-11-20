@@ -154,6 +154,13 @@ always @(posedge clk or negedge rst_n) begin
             end
             
             CHECK_DIM: begin
+                // Debug echo first
+                if (!tx_busy && !tx_start) begin
+                    tx_data <= "L"; // 回显：进入CHECK_DIM状态
+                    tx_start <= 1'b1;
+                end
+                
+                // Then check dimensions
                 if (input_m == 4'd0 || input_m > config_max_dim ||
                     input_n == 4'd0 || input_n > config_max_dim) begin
                     error_code <= `ERR_DIM_RANGE;
@@ -166,30 +173,26 @@ always @(posedge clk or negedge rst_n) begin
                     alloc_n <= input_n;
                     sub_state <= WAIT_ALLOC;
                 end
-                if (!tx_busy) begin
-                        tx_data <= "L"; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                end
             end
             
             WAIT_ALLOC: begin
                 alloc_req <= 1'b1;
+                
+                // Debug echo
+                if (!tx_busy && !tx_start) begin
+                    tx_data <= "W"; // 回显：进入WAIT_ALLOC状态
+                    tx_start <= 1'b1;
+                end
+                
                 if (alloc_valid) begin
                     input_alloc_addr <= alloc_addr;
                     input_matrix_slot <= alloc_slot;
                     elements_written <= 8'd0;
                     alloc_req <= 1'b0;
                     sub_state <= PARSE_DATA;
-                end else if (!alloc_valid && alloc_req) begin
-                    // Allocation failed (no space)
-                    error_code <= `ERR_NO_SPACE;
-                    alloc_req <= 1'b0;
-                    sub_state <= ERROR;
                 end
-                if (!tx_busy) begin
-                        tx_data <= "P"; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                end
+                // Note: If allocation fails, alloc_valid will remain low
+                // You may want to add a timeout counter here if needed
             end
             
             PARSE_DATA: begin
