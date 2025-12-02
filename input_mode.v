@@ -147,10 +147,10 @@ always @(posedge clk or negedge rst_n) begin
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
                     end
                     // 发送确认信息：回显接收到的数据
-                    if (!tx_busy) begin
-                        tx_data <= "M"; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                    end
+                    // if (!tx_busy) begin
+                    //    tx_data <= "M"; // 回显接收到的字符
+                    //    tx_start <= 1'b1;
+                    // end
                 end
             end
             
@@ -164,19 +164,19 @@ always @(posedge clk or negedge rst_n) begin
                         parse_accum <= {parse_accum[4:0], 3'd0} + {6'd0, parse_accum[1:0]} + (rx_data - "0");
                     end
                     // 发送确认信息：回显接收到的数据
-                    if (!tx_busy) begin
-                        tx_data <= "N"; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                    end
+                    // if (!tx_busy) begin
+                    //    tx_data <= "N"; // 回显接收到的字符
+                    //    tx_start <= 1'b1;
+                    // end
                 end
             end
             
             CHECK_DIM: begin
                 // Debug echo first
-                if (!tx_busy && !tx_start) begin
-                    tx_data <= "L"; // 回显：进入CHECK_DIM状态
-                    tx_start <= 1'b1;
-                end
+                // if (!tx_busy && !tx_start) begin
+                //    tx_data <= "L"; // 回显：进入CHECK_DIM状态
+                //    tx_start <= 1'b1;
+                // end
                 
                 // Then check dimensions
                 if (input_m == 4'd0 || input_m > config_max_dim ||
@@ -197,10 +197,10 @@ always @(posedge clk or negedge rst_n) begin
                 alloc_req <= 1'b1;
                 
                 // Debug echo
-                if (!tx_busy && !tx_start) begin
-                    tx_data <= "W"; // 回显：进入WAIT_ALLOC状态
-                    tx_start <= 1'b1;
-                end
+                // if (!tx_busy && !tx_start) begin
+                //    tx_data <= "W"; // 回显：进入WAIT_ALLOC状态
+                //    tx_start <= 1'b1;
+                // end
                 
                 if (alloc_valid) begin
                     input_alloc_addr <= alloc_addr;
@@ -245,10 +245,10 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     // Space and other non-digit characters are ignored (used as separators)
                     // 发送确认信息：回显接收到的数据
-                    if (!tx_busy) begin
-                        tx_data <= rx_data; // 回显接收到的字符
-                        tx_start <= 1'b1;
-                    end
+                    // if (!tx_busy) begin
+                    //    tx_data <= rx_data; // 回显接收到的字符
+                    //    tx_start <= 1'b1;
+                    // end
                 end
             end
             
@@ -365,11 +365,12 @@ always @(posedge clk or negedge rst_n) begin
             
             DONE: begin
                 commit_req <= 1'b0;
-                if (!tx_busy) begin
-                    tx_data <= "D";  // Success indicator ('D')
-                    tx_start <= 1'b1;
-                    sub_state <= IDLE;
-                end
+                // if (!tx_busy) begin
+                //    tx_data <= "D";  // Success indicator ('D')
+                //    tx_start <= 1'b1;
+                //    sub_state <= IDLE;
+                // end
+                sub_state <= IDLE;
             end
             
             ERROR: begin

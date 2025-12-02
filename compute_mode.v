@@ -36,10 +36,28 @@ module compute_mode #(
     input wire [ADDR_WIDTH-1:0] query_addr,
     input wire [7:0] query_element_count,
     
+    // Allocation/Commit Interface
+    output reg alloc_req,
+    output reg [3:0] alloc_m,
+    output reg [3:0] alloc_n,
+    input wire [3:0] alloc_slot,
+    input wire [ADDR_WIDTH-1:0] alloc_addr,
+    input wire alloc_valid,
+    
+    output reg commit_req,
+    output reg [3:0] commit_slot,
+    output reg [3:0] commit_m,
+    output reg [3:0] commit_n,
+    output reg [ADDR_WIDTH-1:0] commit_addr,
+    
     // Memory interface
     output reg mem_rd_en,
     output reg [ADDR_WIDTH-1:0] mem_rd_addr,
     input wire [ELEMENT_WIDTH-1:0] mem_rd_data,
+    
+    output reg mem_wr_en,
+    output reg [ADDR_WIDTH-1:0] mem_wr_addr,
+    output reg [ELEMENT_WIDTH-1:0] mem_wr_data,
     
     output reg [3:0] error_code,
     output reg [3:0] sub_state
@@ -47,34 +65,174 @@ module compute_mode #(
 
 // State definitions
 localparam IDLE = 4'd0, 
-           SELECT_OP = 4'd1,      // New: Select Add/Mul/etc.
+           SELECT_OP = 4'd1,      
            SELECT_MATRIX = 4'd2, 
            READ_OP = 4'd3,
            EXECUTE = 4'd4, 
            SEND_RESULT = 4'd5, 
            DONE = 4'd6;
+// Operation
+localparam OP_TRANSPOSE = 4'd1,
+           OP_ADD = 4'd2,
+           OP_SCALAR_MUL = 4'd3,
+           OP_MUL = 4'd4,
+           OP_CONV = 4'd5;
 
 // Internal button debounce/edge detection (simple version)
 reg btn_prev;
 wire btn_posedge = btn_confirm && !btn_prev;
 
+// Registers for SELECT_MATRIX logic
+reg [4:0] sel_step;
+reg [4:0] scan_slot;
+reg [3:0] iter_m, iter_n;
+reg [7:0] current_count;
+reg [3:0] target_m, target_n;
+reg [3:0] op1_slot, op2_slot;
+reg [7:0] scalar_val;
+reg [7:0] match_idx;
+reg [7:0] user_sel_idx;
+reg [3:0] print_r, print_c;
+reg [3:0] print_step;
+reg [11:0] print_addr;
+
+// Registers for EXECUTE/SEND_RESULT
+reg [7:0] res_send_idx;
+reg [7:0] read_idx;
+reg [3:0] exec_state;
+reg [ADDR_WIDTH-1:0] addr_op1_reg, addr_op2_reg, addr_res_reg;
+reg [3:0] res_slot;
+reg start_op;
+wire done_op;
+
+// Operation Modules Signals
+wire op_rd_en_add, op_wr_en_add, done_add;
+wire [ADDR_WIDTH-1:0] op_rd_addr_add, op_wr_addr_add;
+wire [ELEMENT_WIDTH-1:0] op_wr_data_add;
+
+wire op_rd_en_smul, op_wr_en_smul, done_smul;
+wire [ADDR_WIDTH-1:0] op_rd_addr_smul, op_wr_addr_smul;
+wire [ELEMENT_WIDTH-1:0] op_wr_data_smul;
+
+wire op_rd_en_trans, op_wr_en_trans, done_trans;
+wire [ADDR_WIDTH-1:0] op_rd_addr_trans, op_wr_addr_trans;
+wire [ELEMENT_WIDTH-1:0] op_wr_data_trans;
+
+wire op_rd_en_mul, op_wr_en_mul, done_mul;
+wire [ADDR_WIDTH-1:0] op_rd_addr_mul, op_wr_addr_mul;
+wire [ELEMENT_WIDTH-1:0] op_wr_data_mul;
+
+wire op_rd_en_conv, op_wr_en_conv, done_conv;
+wire [ADDR_WIDTH-1:0] op_rd_addr_conv, op_wr_addr_conv;
+wire [ELEMENT_WIDTH-1:0] op_wr_data_conv;
+
+// Instantiations
+matrix_op_add op_add_inst (
+    .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_ADD), .done(done_add),
+    .dim_m(target_m), .dim_n(target_n),
+    .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
+    .mem_rd_en(op_rd_en_add), .mem_rd_addr(op_rd_addr_add), .mem_rd_data(mem_rd_data),
+    .mem_wr_en(op_wr_en_add), .mem_wr_addr(op_wr_addr_add), .mem_wr_data(op_wr_data_add)
+);
+
+matrix_op_scalar_mul op_smul_inst (
+    .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_SCALAR_MUL), .done(done_smul),
+    .dim_m(target_m), .dim_n(target_n),
+    .addr_op1(addr_op1_reg), .scalar_val(scalar_val), .addr_res(addr_res_reg),
+    .mem_rd_en(op_rd_en_smul), .mem_rd_addr(op_rd_addr_smul), .mem_rd_data(mem_rd_data),
+    .mem_wr_en(op_wr_en_smul), .mem_wr_addr(op_wr_addr_smul), .mem_wr_data(op_wr_data_smul)
+);
+
+matrix_op_transpose op_trans_inst (
+    .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_TRANSPOSE), .done(done_trans),
+    .dim_m(target_m), .dim_n(target_n),
+    .addr_op1(addr_op1_reg), .addr_res(addr_res_reg),
+    .mem_rd_en(op_rd_en_trans), .mem_rd_addr(op_rd_addr_trans), .mem_rd_data(mem_rd_data),
+    .mem_wr_en(op_wr_en_trans), .mem_wr_addr(op_wr_addr_trans), .mem_wr_data(op_wr_data_trans)
+);
+
+matrix_op_mul op_mul_inst (
+    .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_MUL), .done(done_mul),
+    .dim_m(target_m), .dim_n(target_n), .dim_p(target_n), 
+    .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
+    .mem_rd_en(op_rd_en_mul), .mem_rd_addr(op_rd_addr_mul), .mem_rd_data(mem_rd_data),
+    .mem_wr_en(op_wr_en_mul), .mem_wr_addr(op_wr_addr_mul), .mem_wr_data(op_wr_data_mul)
+);
+
+matrix_op_conv op_conv_inst (
+    .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_CONV), .done(done_conv),
+    .dim_m(target_m), .dim_n(target_n),
+    .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
+    .mem_rd_en(op_rd_en_conv), .mem_rd_addr(op_rd_addr_conv), .mem_rd_data(mem_rd_data),
+    .mem_wr_en(op_wr_en_conv), .mem_wr_addr(op_wr_addr_conv), .mem_wr_data(op_wr_data_conv)
+);
+
+assign done_op = done_add | done_smul | done_trans | done_mul | done_conv;
+
+reg internal_rd_en;
+reg [ADDR_WIDTH-1:0] internal_rd_addr;
+
+// Final MUX
+always @(*) begin
+    if (sub_state == EXECUTE) begin
+        case (selected_op_type)
+            OP_ADD: begin
+                mem_rd_en = op_rd_en_add; mem_rd_addr = op_rd_addr_add;
+                mem_wr_en = op_wr_en_add; mem_wr_addr = op_wr_addr_add; mem_wr_data = op_wr_data_add;
+            end
+            OP_SCALAR_MUL: begin
+                mem_rd_en = op_rd_en_smul; mem_rd_addr = op_rd_addr_smul;
+                mem_wr_en = op_wr_en_smul; mem_wr_addr = op_wr_addr_smul; mem_wr_data = op_wr_data_smul;
+            end
+            OP_TRANSPOSE: begin
+                mem_rd_en = op_rd_en_trans; mem_rd_addr = op_rd_addr_trans;
+                mem_wr_en = op_wr_en_trans; mem_wr_addr = op_wr_addr_trans; mem_wr_data = op_wr_data_trans;
+            end
+            OP_MUL: begin
+                mem_rd_en = op_rd_en_mul; mem_rd_addr = op_rd_addr_mul;
+                mem_wr_en = op_wr_en_mul; mem_wr_addr = op_wr_addr_mul; mem_wr_data = op_wr_data_mul;
+            end
+            OP_CONV: begin
+                mem_rd_en = op_rd_en_conv; mem_rd_addr = op_rd_addr_conv;
+                mem_wr_en = op_wr_en_conv; mem_wr_addr = op_wr_addr_conv; mem_wr_data = op_wr_data_conv;
+            end
+            default: begin
+                mem_rd_en = 0; mem_rd_addr = 0;
+                mem_wr_en = 0; mem_wr_addr = 0; mem_wr_data = 0;
+            end
+        endcase
+    end else begin
+        mem_rd_en = internal_rd_en;
+        mem_rd_addr = internal_rd_addr;
+        mem_wr_en = 0;
+        mem_wr_addr = 0;
+        mem_wr_data = 0;
+    end
+end
+
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         sub_state <= IDLE;
-        mem_rd_en <= 1'b0;
+        internal_rd_en <= 1'b0;
         tx_start <= 1'b0;
         error_code <= `ERR_NONE;
         selected_op_type <= 4'd0;
         btn_prev <= 1'b0;
+        alloc_req <= 0;
+        commit_req <= 0;
+        start_op <= 0;
     end else if (mode_active) begin
         btn_prev <= btn_confirm;
         tx_start <= 1'b0;
-        mem_rd_en <= 1'b0;
+        internal_rd_en <= 1'b0;
+        alloc_req <= 0;
+        commit_req <= 0;
+        start_op <= 0;
         
         case (sub_state)
             IDLE: begin
                 selected_op_type <= 4'd0;
-                error_code <= ERR_NONE;
+                error_code <= `ERR_NONE;
                 res_send_idx <= 8'd0;
                 read_idx <= 8'd0;
                 exec_state <= 4'd0;
@@ -83,52 +241,460 @@ always @(posedge clk or negedge rst_n) begin
             
             SELECT_OP: begin
                 case (dip_sw)
-                    3'd1: selected_op_type <= OP_ADD;
-                    3'd2: selected_op_type <= OP_MUL;
-                    3'd3: selected_op_type <= OP_TRANSPOSE;
-                    3'd4: selected_op_type <= OP_DETERMINANT;
+                    3'd1: selected_op_type <= OP_TRANSPOSE;
+                    3'd2: selected_op_type <= OP_ADD;
+                    3'd3: selected_op_type <= OP_SCALAR_MUL;
+                    3'd4: selected_op_type <= OP_MUL;
+                    3'd5: selected_op_type <= OP_CONV;
                     default: selected_op_type <= 4'd0;
                 endcase
 
-                
-                if (btn_posedge) begin
-                    
-                    if (selected_op_type == 4'd0 || selected_op_type > OP_DETERMINANT) begin
-                        error_code <= ERR_INVALID_OP;
-                        sub_state <= ERROR_HANDLER;
-                    end else begin
-                        
-                        if (selected_op_type == OP_TRANSPOSE || selected_op_type == OP_DETERMINANT) begin
-                            sub_state <= SELECT_MATRIX1;
-                        end else begin
-                            sub_state <= SELECT_MATRIX1;
-                        end
-                    end
+                if (btn_posedge && selected_op_type != 4'd0) begin
+                    sub_state <= SELECT_MATRIX;
+                    sel_step <= 0;
                 end
             end
             
             SELECT_MATRIX: begin
-                // Placeholder: Logic to select input matrices would go here
-                query_slot <= 4'd0; // Default to slot 0 for now
-                sub_state <= EXECUTE;
+                case (sel_step)
+                    // PHASE 1: STATISTICS
+                    5'd0: begin // Init
+                        iter_m <= 1;
+                        iter_n <= 1;
+                        scan_slot <= 0;
+                        current_count <= 0;
+                        sel_step <= 5'd1;
+                    end
+                    
+                    5'd1: begin // Set query
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 5'd2; 
+                    end
+                    
+                    5'd2: begin // Check result
+                        if (query_valid && query_m == iter_m && query_n == iter_n)
+                            current_count <= current_count + 1;
+                            
+                        if (scan_slot == 15) begin 
+                            if (current_count > 0) sel_step <= 5'd3; 
+                            else sel_step <= 5'd4; 
+                        end else begin
+                            scan_slot <= scan_slot + 1;
+                            sel_step <= 5'd1;
+                        end
+                    end
+                    
+                    5'd3: begin // Print "M N : C"
+                        if (!tx_busy) begin
+                            case (print_step)
+                                0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
+                                1: begin tx_data <= " "; tx_start <= 1; print_step <= 2; end
+                                2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
+                                3: begin tx_data <= " "; tx_start <= 1; print_step <= 4; end
+                                4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
+                                5: begin tx_data <= " "; tx_start <= 1; print_step <= 6; end
+                                6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
+                                7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
+                                8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 5'd4; end 
+                            endcase
+                        end
+                    end
+                    
+                    5'd4: begin // Next dim
+                        scan_slot <= 0;
+                        current_count <= 0;
+                        if (iter_n < config_max_dim) begin
+                            iter_n <= iter_n + 1;
+                            sel_step <= 5'd1;
+                        end else if (iter_m < config_max_dim) begin
+                            iter_m <= iter_m + 1;
+                            iter_n <= 1;
+                            sel_step <= 5'd1;
+                        end else begin
+                            sel_step <= 5'd5; 
+                        end
+                    end
+
+                    // PHASE 2: INPUT DIMENSIONS
+                    5'd5: begin 
+                        if (rx_done) begin
+                            target_m <= rx_data - "0";
+                            sel_step <= 5'd6;
+                        end
+                    end
+                    
+                    5'd6: begin 
+                        if (rx_done) begin
+                            target_n <= rx_data - "0";
+                            sel_step <= 5'd7;
+                            scan_slot <= 0;
+                            match_idx <= 1;
+                        end
+                    end
+
+                    // PHASE 3: LIST MATRICES
+                    5'd7: begin 
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 5'd8;
+                    end
+                    
+                    5'd8: begin 
+                        if (query_valid && query_m == target_m && query_n == target_n) begin
+                            print_addr <= query_addr;
+                            print_r <= 0;
+                            print_c <= 0;
+                            sel_step <= 5'd9;
+                        end else begin
+                            if (scan_slot == 15) sel_step <= 5'd13; 
+                            else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 5'd7;
+                            end
+                        end
+                    end
+                    
+                    5'd9: begin // Print Index
+                        if (!tx_busy) begin
+                            tx_data <= match_idx + "0"; 
+                            tx_start <= 1;
+                            sel_step <= 5'd21; // Send Newline
+                        end
+                    end
+
+                    5'd21: begin // Send Newline after Index
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0D; // CR
+                            tx_start <= 1;
+                            sel_step <= 5'd23;
+                        end
+                    end
+
+                    5'd23: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            sel_step <= 5'd10;
+                        end
+                    end
+                    
+                    5'd10: begin // Print Matrix Content (Read BRAM)
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * target_n) + print_c;
+                        sel_step <= 5'd11;
+                    end
+                    
+                    5'd11: begin // Wait read
+                        sel_step <= 5'd12;
+                    end
+                    
+                    5'd12: begin // Send Element
+                        if (!tx_busy) begin
+                            tx_data <= mem_rd_data[3:0] + "0";
+                            tx_start <= 1;
+                            sel_step <= 5'd22;
+                        end
+                    end
+
+                    5'd22: begin // Check Row End
+                        if (print_c == target_n - 1) begin
+                             if (!tx_busy) begin
+                                 tx_data <= 8'h0D; // CR
+                                 tx_start <= 1;
+                                 sel_step <= 5'd24;
+                             end
+                        end else begin
+                             if (!tx_busy) begin
+                                 tx_data <= " "; // Space between elements
+                                 tx_start <= 1;
+                                 print_c <= print_c + 1;
+                                 sel_step <= 5'd10;
+                             end
+                        end
+                    end
+
+                    5'd24: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            print_c <= 0;
+                            if (print_r == target_m - 1) begin
+                                match_idx <= match_idx + 1;
+                                // FIX: Only increment scan_slot if we are done printing this matrix
+                                if (scan_slot == 15) sel_step <= 5'd13;
+                                else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 5'd7;
+                                end
+                            end else begin
+                                print_r <= print_r + 1;
+                                sel_step <= 5'd10; 
+                            end
+                        end
+                    end
+
+                    // PHASE 4: SELECT OPERANDS
+                    5'd13: begin // Wait Selection 1
+                        if (rx_done) begin
+                            user_sel_idx <= rx_data - "0";
+                            scan_slot <= 0;
+                            match_idx <= 1;
+                            sel_step <= 5'd14; 
+                        end
+                    end
+                    
+                    5'd14: begin // Find Slot for Sel 1
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 5'd15;
+                    end
+                    
+                    5'd15: begin
+                        if (query_valid && query_m == target_m && query_n == target_n) begin
+                            if (match_idx == user_sel_idx) begin
+                                op1_slot <= scan_slot[3:0];
+                                if (selected_op_type == OP_TRANSPOSE || selected_op_type == OP_SCALAR_MUL) begin
+                                    if (selected_op_type == OP_SCALAR_MUL) sel_step <= 5'd19; 
+                                    else sel_step <= 5'd20; 
+                                end else begin
+                                    sel_step <= 5'd16; 
+                                end
+                            end else begin
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) begin
+                                    scan_slot <= 0;
+                                    sel_step <= 5'd13;
+                                end else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 5'd14;
+                                end
+                            end
+                        end else begin
+                            if (scan_slot == 15) begin
+                                // Not found, reset or handle error
+                                scan_slot <= 0;
+                                sel_step <= 5'd13; // Go back to wait input
+                            end else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 5'd14;
+                            end
+                        end
+                    end
+                    
+                    5'd16: begin // Wait Selection 2
+                        if (rx_done) begin
+                            user_sel_idx <= rx_data - "0";
+                            scan_slot <= 0;
+                            match_idx <= 1;
+                            sel_step <= 5'd17;
+                        end
+                    end
+                    
+                    5'd17: begin // Find Slot for Sel 2
+                         query_slot <= scan_slot[3:0];
+                         sel_step <= 5'd18;
+                    end
+                    
+                    5'd18: begin
+                        if (query_valid && query_m == target_m && query_n == target_n) begin
+                            if (match_idx == user_sel_idx) begin
+                                op2_slot <= scan_slot[3:0];
+                                sel_step <= 5'd20; 
+                            end else begin
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) begin
+                                    scan_slot <= 0;
+                                    sel_step <= 5'd16;
+                                end else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 5'd17;
+                                end
+                            end
+                        end else begin
+                            if (scan_slot == 15) begin
+                                scan_slot <= 0;
+                                sel_step <= 5'd16; // Go back to wait input 2
+                            end else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 5'd17;
+                            end
+                        end
+                    end
+                    
+                    5'd19: begin // Wait Scalar
+                        if (rx_done) begin
+                            scalar_val <= rx_data - "0";
+                            sel_step <= 5'd20;
+                        end
+                    end
+                    
+                    5'd20: begin // Confirm
+                        if (btn_posedge) begin
+                            sub_state <= EXECUTE;
+                            exec_state <= 0;
+                        end
+                    end
+                    
+                endcase
             end
             
             EXECUTE: begin
-                // CALCULATION LOGIC PENDING
-                // For now, pass through
-                sub_state <= SEND_RESULT;
+                case (exec_state)
+                    0: begin // Get Op1 Addr
+                        query_slot <= op1_slot;
+                        exec_state <= 1;
+                    end
+                    1: begin
+                        addr_op1_reg <= query_addr;
+                        if (selected_op_type != OP_TRANSPOSE && selected_op_type != OP_SCALAR_MUL) begin
+                            exec_state <= 2;
+                        end else begin
+                            exec_state <= 4; 
+                        end
+                    end
+                    2: begin // Get Op2 Addr
+                        query_slot <= op2_slot;
+                        exec_state <= 3;
+                    end
+                    3: begin
+                        addr_op2_reg <= query_addr;
+                        exec_state <= 4;
+                    end
+                    4: begin // Alloc Result
+                        alloc_req <= 1;
+                        if (selected_op_type == OP_TRANSPOSE) begin
+                            alloc_m <= target_n;
+                            alloc_n <= target_m;
+                        end else begin
+                            alloc_m <= target_m;
+                            alloc_n <= target_n;
+                        end
+                        exec_state <= 5;
+                    end
+                    5: begin
+                        if (alloc_valid) begin
+                            alloc_req <= 0;
+                            res_slot <= alloc_slot;
+                            addr_res_reg <= alloc_addr;
+                            exec_state <= 6;
+                        end
+                    end
+                    6: begin // Start Op
+                        start_op <= 1;
+                        exec_state <= 7;
+                    end
+                    7: begin
+                        start_op <= 0;
+                        if (done_op) exec_state <= 8;
+                    end
+                    8: begin // Commit
+                        commit_req <= 1;
+                        commit_slot <= res_slot;
+                        if (selected_op_type == OP_TRANSPOSE) begin
+                            commit_m <= target_n;
+                            commit_n <= target_m;
+                        end else begin
+                            commit_m <= target_m;
+                            commit_n <= target_n;
+                        end
+                        commit_addr <= addr_res_reg;
+                        exec_state <= 9;
+                    end
+                    9: begin
+                        commit_req <= 0;
+                        // Prepare for printing result
+                        print_addr <= addr_res_reg;
+                        print_r <= 0;
+                        print_c <= 0;
+                        
+                        // Set dimensions for printing
+                        if (selected_op_type == OP_TRANSPOSE) begin
+                            iter_m <= target_n; 
+                            iter_n <= target_m; 
+                        end else begin
+                            iter_m <= target_m;
+                            iter_n <= target_n;
+                        end
+                        
+                        res_send_idx <= 0;
+                        sub_state <= SEND_RESULT;
+                    end
+                endcase
             end
             
             SEND_RESULT: begin
-                if (!tx_busy) begin
-                    tx_data <= "R"; // R for Result
-                    tx_start <= 1'b1;
-                    sub_state <= DONE;
-                end
+                case (res_send_idx)
+                    0: begin // Send Result Slot
+                        if (!tx_busy) begin
+                            tx_data <= res_slot + "0"; 
+                            tx_start <= 1;
+                            res_send_idx <= 1;
+                        end
+                    end
+                    1: begin // Send CR
+                         if (!tx_busy) begin
+                            tx_data <= 8'h0D; 
+                            tx_start <= 1;
+                            res_send_idx <= 7;
+                        end
+                    end
+                    7: begin // Send LF
+                         if (!tx_busy) begin
+                            tx_data <= 8'h0A; 
+                            tx_start <= 1;
+                            res_send_idx <= 2;
+                        end
+                    end
+                    2: begin // Read BRAM
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * iter_n) + print_c;
+                        res_send_idx <= 3;
+                    end
+                    3: begin // Wait for Read
+                        internal_rd_en <= 0;
+                        res_send_idx <= 4;
+                    end
+                    4: begin // Send Data
+                        if (!tx_busy) begin
+                            tx_data <= mem_rd_data[3:0] + "0"; 
+                            tx_start <= 1;
+                            res_send_idx <= 6;
+                        end
+                    end
+                    6: begin // Check Row End
+                        if (print_c == iter_n - 1) begin
+                            if (!tx_busy) begin
+                                tx_data <= 8'h0D; // CR
+                                tx_start <= 1;
+                                res_send_idx <= 8;
+                            end
+                        end else begin
+                            if (!tx_busy) begin
+                                tx_data <= " "; // Space
+                                tx_start <= 1;
+                                print_c <= print_c + 1;
+                                res_send_idx <= 2; 
+                            end
+                        end
+                    end
+                    8: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            print_c <= 0;
+                            if (print_r == iter_m - 1) begin
+                                res_send_idx <= 5; 
+                            end else begin
+                                print_r <= print_r + 1;
+                                res_send_idx <= 2; 
+                            end
+                        end
+                    end
+                    5: begin // Done
+                        sub_state <= DONE;
+                    end
+                endcase
             end
             
             DONE: begin
-                // Wait here or go back to IDLE
                  if (btn_posedge) sub_state <= IDLE;
             end
             
@@ -136,7 +702,7 @@ always @(posedge clk or negedge rst_n) begin
         endcase
     end else begin
         sub_state <= IDLE;
-        btn_prev <= 1'b0;
+        btn_prev <= btn_confirm;
     end
 end
 

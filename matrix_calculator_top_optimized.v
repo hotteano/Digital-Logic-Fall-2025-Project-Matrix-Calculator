@@ -158,13 +158,15 @@ wire [`ELEMENT_WIDTH-1:0] mem_wr_data_input, mem_wr_data_generate;
 wire mem_rd_en_input;
 wire [`BRAM_ADDR_WIDTH-1:0] mem_rd_addr_input;
 
-assign mem_a_en = mem_wr_en_input | mem_wr_en_generate | mem_rd_en_display | mem_rd_en_compute;
-assign mem_a_we = mem_wr_en_input | mem_wr_en_generate;
+assign mem_a_en = mem_wr_en_input | mem_wr_en_generate | mem_wr_en_compute | mem_rd_en_display | mem_rd_en_compute;
+assign mem_a_we = mem_wr_en_input | mem_wr_en_generate | mem_wr_en_compute;
 assign mem_a_addr = mem_wr_en_input ? mem_wr_addr_input :
                     mem_wr_en_generate ? mem_wr_addr_generate :
+                    mem_wr_en_compute ? mem_wr_addr_compute :
                     mem_rd_en_display ? mem_rd_addr_display :
                     mem_rd_addr_compute;
-assign mem_a_din = mem_wr_en_input ? mem_wr_data_input : mem_wr_data_generate;
+assign mem_a_din = mem_wr_en_input ? mem_wr_data_input : 
+                   mem_wr_en_generate ? mem_wr_data_generate : mem_wr_data_compute;
 
 // Port B is currently used only by Input Mode for verification
 assign mem_b_en = mem_rd_en_input;
@@ -175,6 +177,15 @@ assign mem_b_addr = mem_rd_addr_input;
 // ========================================
 wire mem_rd_en_display, mem_rd_en_compute;
 wire [`BRAM_ADDR_WIDTH-1:0] mem_rd_addr_display, mem_rd_addr_compute;
+
+// New wires for Compute Mode Write/Alloc
+wire alloc_req_compute, commit_req_compute;
+wire [3:0] alloc_m_compute, alloc_n_compute;
+wire [3:0] commit_slot_compute, commit_m_compute, commit_n_compute;
+wire [`BRAM_ADDR_WIDTH-1:0] commit_addr_compute;
+wire mem_wr_en_compute;
+wire [`BRAM_ADDR_WIDTH-1:0] mem_wr_addr_compute;
+wire [`ELEMENT_WIDTH-1:0] mem_wr_data_compute;
 
 // Connect read data from BRAM port A
 wire [`ELEMENT_WIDTH-1:0] mem_rd_data = mem_a_dout;
@@ -189,14 +200,20 @@ wire [3:0] commit_slot_input, commit_slot_generate;
 wire [3:0] commit_m_input, commit_n_input, commit_m_generate, commit_n_generate;
 wire [`BRAM_ADDR_WIDTH-1:0] commit_addr_input, commit_addr_generate;
 
-assign alloc_req_mux = alloc_req_input | alloc_req_generate;
-assign alloc_m_mux = input_mode_active ? alloc_m_input : alloc_m_generate;
-assign alloc_n_mux = input_mode_active ? alloc_n_input : alloc_n_generate;
-assign commit_req_mux = commit_req_input | commit_req_generate;
-assign commit_slot_mux = input_mode_active ? commit_slot_input : commit_slot_generate;
-assign commit_m_mux = input_mode_active ? commit_m_input : commit_m_generate;
-assign commit_n_mux = input_mode_active ? commit_n_input : commit_n_generate;
-assign commit_addr_mux = input_mode_active ? commit_addr_input : commit_addr_generate;
+assign alloc_req_mux = alloc_req_input | alloc_req_generate | alloc_req_compute;
+assign alloc_m_mux = input_mode_active ? alloc_m_input : 
+                     generate_mode_active ? alloc_m_generate : alloc_m_compute;
+assign alloc_n_mux = input_mode_active ? alloc_n_input : 
+                     generate_mode_active ? alloc_n_generate : alloc_n_compute;
+assign commit_req_mux = commit_req_input | commit_req_generate | commit_req_compute;
+assign commit_slot_mux = input_mode_active ? commit_slot_input : 
+                         generate_mode_active ? commit_slot_generate : commit_slot_compute;
+assign commit_m_mux = input_mode_active ? commit_m_input : 
+                      generate_mode_active ? commit_m_generate : commit_m_compute;
+assign commit_n_mux = input_mode_active ? commit_n_input : 
+                      generate_mode_active ? commit_n_generate : commit_n_compute;
+assign commit_addr_mux = input_mode_active ? commit_addr_input : 
+                         generate_mode_active ? commit_addr_generate : commit_addr_compute;
 
 wire [3:0] query_slot_display, query_slot_compute;
 assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_compute;
@@ -485,9 +502,28 @@ compute_mode compute_mode_inst (
         .query_n(query_n),
         .query_addr(query_addr),
         .query_element_count(query_element_count),
+        
+        .alloc_req(alloc_req_compute),
+        .alloc_m(alloc_m_compute),
+        .alloc_n(alloc_n_compute),
+        .alloc_slot(alloc_slot),
+        .alloc_addr(alloc_addr),
+        .alloc_valid(alloc_valid),
+        
+        .commit_req(commit_req_compute),
+        .commit_slot(commit_slot_compute),
+        .commit_m(commit_m_compute),
+        .commit_n(commit_n_compute),
+        .commit_addr(commit_addr_compute),
+        
         .mem_rd_en(mem_rd_en_compute),
         .mem_rd_addr(mem_rd_addr_compute),
         .mem_rd_data(mem_rd_data),
+        
+        .mem_wr_en(mem_wr_en_compute),
+        .mem_wr_addr(mem_wr_addr_compute),
+        .mem_wr_data(mem_wr_data_compute),
+        
         .error_code(error_code_compute),
         .sub_state(sub_state_compute)
     );
@@ -525,8 +561,7 @@ display_ctrl disp_ctrl_inst (
         // ���?1?7??? Compute ģʽ����?1?7??? op_type������Ϊ 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         .error_code(error_code),
-        .error_timer(error_timer[25:20]),
-        .seg_display(seg_display), // ֱ������?1?7??? Output Port
+        .seg_display(seg_display), // ֱ?1?7??? Output Port
         .led_status(led_status),
         .seg_select(seg_select)    // ֱ������?1?7??? Output Port
     );

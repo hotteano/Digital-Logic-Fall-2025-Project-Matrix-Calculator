@@ -10,7 +10,7 @@
 `define CLK_FREQ          100_000_000
 `define BAUD_RATE         115200
 `define MAX_POSSIBLE_DIM  6
-`define MAX_STORAGE_MATRICES 20
+`define MAX_STORAGE_MATRICES 16
 `define MAX_ELEMENTS      4096
 `define BRAM_ADDR_WIDTH   12          // 2^12 = 4096
 `define DEFAULT_MAX_DIM   5

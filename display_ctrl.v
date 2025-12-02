@@ -8,7 +8,6 @@ module display_ctrl (
     input wire [3:0] sub_state,
     input wire [3:0] op_type,
     input wire [3:0] error_code,
-    input wire [5:0] error_timer,
     output reg [6:0] seg_display,
     output reg [3:0] led_status,
     output reg [1:0] seg_select // 改为 output，直接由内部逻辑控制扫描
