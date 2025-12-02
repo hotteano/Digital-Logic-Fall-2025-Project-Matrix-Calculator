@@ -84,7 +84,7 @@ reg btn_prev;
 wire btn_posedge = btn_confirm && !btn_prev;
 
 // Registers for SELECT_MATRIX logic
-reg [4:0] sel_step;
+reg [5:0] sel_step;
 reg [4:0] scan_slot;
 reg [3:0] iter_m, iter_n;
 reg [7:0] current_count;
@@ -443,7 +443,7 @@ always @(posedge clk or negedge rst_n) begin
                     
                     5'd14: begin // Find Slot for Sel 1
                         query_slot <= scan_slot[3:0];
-                        sel_step <= 5'd15;
+                        sel_step <= 6'd15;
                     end
                     
                     5'd15: begin
@@ -451,29 +451,29 @@ always @(posedge clk or negedge rst_n) begin
                             if (match_idx == user_sel_idx) begin
                                 op1_slot <= scan_slot[3:0];
                                 if (selected_op_type == OP_TRANSPOSE || selected_op_type == OP_SCALAR_MUL) begin
-                                    if (selected_op_type == OP_SCALAR_MUL) sel_step <= 5'd19; 
-                                    else sel_step <= 5'd20; 
+                                    if (selected_op_type == OP_SCALAR_MUL) sel_step <= 6'd43; // Wait RX low then 19
+                                    else sel_step <= 6'd25; // Print Op1
                                 end else begin
-                                    sel_step <= 5'd16; 
+                                    sel_step <= 6'd42; // Wait RX low then 16
                                 end
                             end else begin
                                 match_idx <= match_idx + 1;
                                 if (scan_slot == 15) begin
                                     scan_slot <= 0;
-                                    sel_step <= 5'd13;
+                                    sel_step <= 6'd13;
                                 end else begin
                                     scan_slot <= scan_slot + 1;
-                                    sel_step <= 5'd14;
+                                    sel_step <= 6'd14;
                                 end
                             end
                         end else begin
                             if (scan_slot == 15) begin
                                 // Not found, reset or handle error
                                 scan_slot <= 0;
-                                sel_step <= 5'd13; // Go back to wait input
+                                sel_step <= 6'd13; // Go back to wait input
                             end else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 5'd14;
+                                sel_step <= 6'd14;
                             end
                         end
                     end
@@ -483,37 +483,37 @@ always @(posedge clk or negedge rst_n) begin
                             user_sel_idx <= rx_data - "0";
                             scan_slot <= 0;
                             match_idx <= 1;
-                            sel_step <= 5'd17;
+                            sel_step <= 6'd17;
                         end
                     end
                     
                     5'd17: begin // Find Slot for Sel 2
                          query_slot <= scan_slot[3:0];
-                         sel_step <= 5'd18;
+                         sel_step <= 6'd18;
                     end
                     
                     5'd18: begin
                         if (query_valid && query_m == target_m && query_n == target_n) begin
                             if (match_idx == user_sel_idx) begin
                                 op2_slot <= scan_slot[3:0];
-                                sel_step <= 5'd20; 
+                                sel_step <= 6'd25; // Print Op1 then Op2
                             end else begin
                                 match_idx <= match_idx + 1;
                                 if (scan_slot == 15) begin
                                     scan_slot <= 0;
-                                    sel_step <= 5'd16;
+                                    sel_step <= 6'd16;
                                 end else begin
                                     scan_slot <= scan_slot + 1;
-                                    sel_step <= 5'd17;
+                                    sel_step <= 6'd17;
                                 end
                             end
                         end else begin
                             if (scan_slot == 15) begin
                                 scan_slot <= 0;
-                                sel_step <= 5'd16; // Go back to wait input 2
+                                sel_step <= 6'd16; // Go back to wait input 2
                             end else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 5'd17;
+                                sel_step <= 6'd17;
                             end
                         end
                     end
@@ -521,7 +521,7 @@ always @(posedge clk or negedge rst_n) begin
                     5'd19: begin // Wait Scalar
                         if (rx_done) begin
                             scalar_val <= rx_data - "0";
-                            sel_step <= 5'd20;
+                            sel_step <= 6'd25; // Print Op1 then Scalar
                         end
                     end
                     
@@ -530,6 +530,174 @@ always @(posedge clk or negedge rst_n) begin
                             sub_state <= EXECUTE;
                             exec_state <= 0;
                         end
+                    end
+
+                    // ==========================================
+                    // NEW: Print Selected Operands Sequence
+                    // ==========================================
+                    
+                    // --- Print Op1 ---
+                    6'd25: begin 
+                        query_slot <= op1_slot;
+                        sel_step <= 6'd26;
+                    end
+                    
+                    6'd26: begin
+                        print_addr <= query_addr;
+                        print_r <= 0;
+                        print_c <= 0;
+                        sel_step <= 6'd27;
+                    end
+                    
+                    6'd27: begin // Read BRAM
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * target_n) + print_c;
+                        sel_step <= 6'd28;
+                    end
+                    
+                    6'd28: begin // Wait read
+                        sel_step <= 6'd29;
+                    end
+                    
+                    6'd29: begin // Send Element
+                        if (!tx_busy) begin
+                            tx_data <= mem_rd_data[3:0] + "0";
+                            tx_start <= 1;
+                            sel_step <= 6'd30;
+                        end
+                    end
+
+                    6'd30: begin // Check Row End
+                        if (print_c == target_n - 1) begin
+                             if (!tx_busy) begin
+                                 tx_data <= 8'h0D; // CR
+                                 tx_start <= 1;
+                                 sel_step <= 6'd31;
+                             end
+                        end else begin
+                             if (!tx_busy) begin
+                                 tx_data <= " "; // Space
+                                 tx_start <= 1;
+                                 print_c <= print_c + 1;
+                                 sel_step <= 6'd27;
+                             end
+                        end
+                    end
+
+                    6'd31: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            print_c <= 0;
+                            if (print_r == target_m - 1) begin
+                                // Op1 Done. Next?
+                                if (selected_op_type == OP_TRANSPOSE) sel_step <= 6'd20;
+                                else if (selected_op_type == OP_SCALAR_MUL) sel_step <= 6'd39;
+                                else sel_step <= 6'd32; // Print Op2
+                            end else begin
+                                print_r <= print_r + 1;
+                                sel_step <= 6'd27; 
+                            end
+                        end
+                    end
+
+                    // --- Print Op2 ---
+                    6'd32: begin 
+                        query_slot <= op2_slot;
+                        sel_step <= 6'd33;
+                    end
+                    
+                    6'd33: begin
+                        print_addr <= query_addr;
+                        print_r <= 0;
+                        print_c <= 0;
+                        sel_step <= 6'd34;
+                    end
+                    
+                    6'd34: begin // Read BRAM
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * target_n) + print_c;
+                        sel_step <= 6'd35;
+                    end
+                    
+                    6'd35: begin // Wait read
+                        sel_step <= 6'd36;
+                    end
+                    
+                    6'd36: begin // Send Element
+                        if (!tx_busy) begin
+                            tx_data <= mem_rd_data[3:0] + "0";
+                            tx_start <= 1;
+                            sel_step <= 6'd37;
+                        end
+                    end
+
+                    6'd37: begin // Check Row End
+                        if (print_c == target_n - 1) begin
+                             if (!tx_busy) begin
+                                 tx_data <= 8'h0D; // CR
+                                 tx_start <= 1;
+                                 sel_step <= 6'd38;
+                             end
+                        end else begin
+                             if (!tx_busy) begin
+                                 tx_data <= " "; // Space
+                                 tx_start <= 1;
+                                 print_c <= print_c + 1;
+                                 sel_step <= 6'd34;
+                             end
+                        end
+                    end
+
+                    6'd38: begin // Send LF
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            print_c <= 0;
+                            if (print_r == target_m - 1) begin
+                                // Op2 Done.
+                                sel_step <= 6'd20;
+                            end else begin
+                                print_r <= print_r + 1;
+                                sel_step <= 6'd34; 
+                            end
+                        end
+                    end
+
+                    // --- Print Scalar ---
+                    6'd39: begin 
+                        if (!tx_busy) begin
+                            tx_data <= scalar_val + "0";
+                            tx_start <= 1;
+                            sel_step <= 6'd40;
+                        end
+                    end
+                    
+                    6'd40: begin
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0D;
+                            tx_start <= 1;
+                            sel_step <= 6'd41;
+                        end
+                    end
+                    
+                    6'd41: begin
+                        if (!tx_busy) begin
+                            tx_data <= 8'h0A;
+                            tx_start <= 1;
+                            sel_step <= 6'd20;
+                        end
+                    end
+
+                    // ==========================================
+                    // NEW: Wait for RX Done to Clear (Debounce)
+                    // ==========================================
+                    6'd42: begin // Wait for !rx_done before Op2
+                        if (!rx_done) sel_step <= 6'd16;
+                    end
+
+                    6'd43: begin // Wait for !rx_done before Scalar
+                        if (!rx_done) sel_step <= 6'd19;
                     end
                     
                 endcase

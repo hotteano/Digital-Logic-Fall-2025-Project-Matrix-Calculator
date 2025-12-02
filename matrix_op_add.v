@@ -31,7 +31,7 @@ module matrix_op_add #(
     reg [ELEMENT_WIDTH-1:0] val1;
     reg [ELEMENT_WIDTH-1:0] val2;
     
-    localparam S_IDLE = 0, S_READ_1 = 1, S_WAIT_1 = 2, S_WAIT_1_B = 3, S_CAPTURE_1 = 4, S_READ_2 = 5, S_WAIT_2 = 6, S_WAIT_2_B = 7, S_CAPTURE_2 = 8, S_WRITE = 9, S_NEXT = 10, S_DONE = 11;
+    localparam S_IDLE = 0, S_READ_1 = 1, S_WAIT_1 = 2, S_WAIT_1_B = 3, S_CAPTURE_1 = 4, S_PRE_READ_2 = 12, S_READ_2 = 5, S_WAIT_2 = 6, S_WAIT_2_B = 7, S_CAPTURE_2 = 8, S_WRITE = 9, S_NEXT = 10, S_DONE = 11;
     
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -71,6 +71,10 @@ module matrix_op_add #(
 
                 S_CAPTURE_1: begin
                     val1 <= mem_rd_data; // Capture data from READ_1 safely
+                    state <= S_PRE_READ_2;
+                end
+
+                S_PRE_READ_2: begin
                     state <= S_READ_2;
                 end
                 
