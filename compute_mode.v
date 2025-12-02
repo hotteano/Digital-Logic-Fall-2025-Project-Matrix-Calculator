@@ -1,5 +1,6 @@
 // ========================================
-// Matrix Compute Mode (Interaction Optimized)
+// Matrix Compute Mode (Optimized with BRAM Writeback)
+// Supports: Add, Multiply, Scalar Multiply, Transpose
 // ========================================
 
 `timescale 1ns / 1ps
@@ -13,12 +14,12 @@ module compute_mode #(
     input wire rst_n,
     input wire mode_active,
     input wire [3:0] config_max_dim,
-    
-    // New Inputs for Interaction
+
+    // DIP switches and buttons
     input wire [2:0] dip_sw,
     input wire btn_confirm,
-    output reg [3:0] selected_op_type, // Output to display
-    
+    output reg [3:0] selected_op_type, 
+
     // UART interface
     input wire [7:0] rx_data,
     input wire rx_done,
@@ -26,7 +27,7 @@ module compute_mode #(
     output reg [7:0] tx_data,
     output reg tx_start,
     input wire tx_busy,
-    
+
     // Matrix manager interface
     input wire [7:0] total_matrix_count,
     output reg [3:0] query_slot,
@@ -215,8 +216,6 @@ always @(posedge clk or negedge rst_n) begin
         sub_state <= IDLE;
         internal_rd_en <= 1'b0;
         tx_start <= 1'b0;
-        error_code <= `ERR_NONE;
-        selected_op_type <= 4'd0;
         btn_prev <= 1'b0;
         alloc_req <= 0;
         commit_req <= 0;
@@ -238,7 +237,7 @@ always @(posedge clk or negedge rst_n) begin
                 exec_state <= 4'd0;
                 sub_state <= SELECT_OP;
             end
-            
+
             SELECT_OP: begin
                 case (dip_sw)
                     3'd1: selected_op_type <= OP_TRANSPOSE;
@@ -703,7 +702,7 @@ always @(posedge clk or negedge rst_n) begin
                     
                 endcase
             end
-            
+
             EXECUTE: begin
                 case (exec_state)
                     0: begin // Get Op1 Addr
@@ -787,7 +786,7 @@ always @(posedge clk or negedge rst_n) begin
                     end
                 endcase
             end
-            
+
             SEND_RESULT: begin
                 case (res_send_idx)
                     0: begin // Send Result Slot
@@ -861,11 +860,11 @@ always @(posedge clk or negedge rst_n) begin
                     end
                 endcase
             end
-            
+
             DONE: begin
                  if (btn_posedge) sub_state <= IDLE;
             end
-            
+
             default: sub_state <= IDLE;
         endcase
     end else begin
