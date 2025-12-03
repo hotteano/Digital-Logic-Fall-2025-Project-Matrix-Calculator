@@ -232,71 +232,90 @@ always @(posedge clk or negedge rst_n) begin
                     sub_state <= IDLE;
                 end else if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        // Accumulate digit
-                        // Check if adding this digit exceeds max value
-                        // Note: parse_accum * 10 + digit
-                        if (({8'd0, parse_accum} * 16'd10 + {8'd0, rx_data} - 16'd48) > {12'd0, config_max_value}) begin
-                             error_code <= `ERR_VALUE_RANGE;
-                             if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
-                             // Stay in PARSE_DATA, do not update accum, wait for valid input
+                        if (error_code != `ERR_NONE) begin
+                            // Error recovery: if in error state, try to start a new number
+                            // Check if the single digit is valid
+                            if (({4'd0, rx_data} - 8'd48) <= {4'd0, config_max_value}) begin
+                                parse_accum <= rx_data - "0";
+                                error_code <= `ERR_NONE;
+                                digit_received <= 1'b1;
+                            end else begin
+                                // Still invalid even as a single digit
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
                         end else begin
-                             parse_accum <= parse_accum * 8'd10 + (rx_data - "0");
-                             digit_received <= 1'b1;
-                             error_code <= `ERR_NONE;
+                            // Normal accumulation
+                            // Check if adding this digit exceeds max value
+                            // Note: parse_accum * 10 + digit
+                            if (({8'd0, parse_accum} * 16'd10 + {8'd0, rx_data} - 16'd48) > {12'd0, config_max_value}) begin
+                                 error_code <= `ERR_VALUE_RANGE;
+                                 if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
+                                 // Stay in PARSE_DATA, do not update accum, wait for valid input
+                            end else begin
+                                 parse_accum <= parse_accum * 8'd10 + (rx_data - "0");
+                                 digit_received <= 1'b1;
+                                 error_code <= `ERR_NONE;
+                            end
                         end
                     end else if (rx_data == 8'h20) begin // Space
-                        if (digit_received) begin
-                            if (elements_written < total_elements) begin
-                                mem_wr_en <= 1'b1;
-                                mem_wr_addr <= input_alloc_addr + elements_written;
-                                mem_wr_data <= parse_accum;
-                                elements_written <= elements_written + 1'b1;
-                                
-                                // Check if done
-                                if ((elements_written + 1'b1) >= total_elements) begin
+                        if (error_code == `ERR_NONE) begin
+                            if (digit_received) begin
+                                if (elements_written < total_elements) begin
+                                    mem_wr_en <= 1'b1;
+                                    mem_wr_addr <= input_alloc_addr + elements_written;
+                                    mem_wr_data <= parse_accum;
+                                    elements_written <= elements_written + 1'b1;
+                                    
+                                    // Check if done
+                                    if ((elements_written + 1'b1) >= total_elements) begin
+                                        sub_state <= COMMIT;
+                                    end
+                                end
+                                parse_accum <= 8'd0;
+                                digit_received <= 1'b0;
+                            end
+                            // If space received without digits (e.g. multiple spaces), just ignore.
+                        end
+                        // If error exists, do nothing (maintain error state)
+                    end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin // Enter
+                        if (error_code == `ERR_NONE) begin
+                            if (digit_received) begin
+                                // Write the pending number
+                                if (elements_written < total_elements) begin
+                                    mem_wr_en <= 1'b1;
+                                    mem_wr_addr <= input_alloc_addr + elements_written;
+                                    mem_wr_data <= parse_accum;
+                                    elements_written <= elements_written + 1'b1;
+                                    
+                                    if ((elements_written + 1'b1) >= total_elements) begin
+                                        sub_state <= COMMIT;
+                                    end else begin
+                                        sub_state <= FILL_ZEROS;
+                                    end
+                                end else begin
+                                    // Should not happen if logic is correct (checked < total_elements)
+                                    sub_state <= COMMIT;
+                                end
+                            end else begin
+                                // No pending number
+                                if (elements_written < total_elements) begin
+                                    sub_state <= FILL_ZEROS;
+                                end else begin
                                     sub_state <= COMMIT;
                                 end
                             end
                             parse_accum <= 8'd0;
                             digit_received <= 1'b0;
                         end
-                        error_code <= `ERR_NONE;
-                        // If space received without digits (e.g. multiple spaces), just ignore.
-                    end else if (rx_data == 8'h0D || rx_data == 8'h0A) begin // Enter
-                        if (digit_received) begin
-                            // Write the pending number
-                            if (elements_written < total_elements) begin
-                                mem_wr_en <= 1'b1;
-                                mem_wr_addr <= input_alloc_addr + elements_written;
-                                mem_wr_data <= parse_accum;
-                                elements_written <= elements_written + 1'b1;
-                                
-                                if ((elements_written + 1'b1) >= total_elements) begin
-                                    sub_state <= COMMIT;
-                                end else begin
-                                    sub_state <= FILL_ZEROS;
-                                end
-                            end else begin
-                                // Should not happen if logic is correct (checked < total_elements)
-                                sub_state <= COMMIT;
-                            end
-                        end else begin
-                            // No pending number
-                            if (elements_written < total_elements) begin
-                                sub_state <= FILL_ZEROS;
-                            end else begin
-                                sub_state <= COMMIT;
-                            end
-                        end
-                        parse_accum <= 8'd0;
-                        digit_received <= 1'b0;
-                        error_code <= `ERR_NONE;
+                        // If error exists, do nothing (maintain error state)
                     end else begin
                         // Invalid character received (not a digit, not space, not enter)
-                        error_code <= `ERR_INVALID_CHAR; // Or define a new error code like ERR_INVALID_CHAR
+                        error_code <= `ERR_VALUE_RANGE; // Or define a new error code like ERR_INVALID_CHAR
                         if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end // Echo '!'
                         // Stay in PARSE_DATA
                     end
+                end else if (error_code != `ERR_NONE) begin
+                    // Keep error code until timeout_reset or valid input
                 end
             end
             
