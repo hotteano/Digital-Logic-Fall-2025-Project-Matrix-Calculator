@@ -54,7 +54,7 @@ module generate_mode #(
 localparam IDLE = 4'd0, WAIT_M = 4'd1, WAIT_N = 4'd2, 
            ALLOC = 4'd3, GEN_LATCH = 4'd4, SEND_VAL = 4'd5, 
            SEND_SPACE = 4'd6, SEND_NEWLINE = 4'd7, 
-           COMMIT = 4'd8, DONE = 4'd9;
+           COMMIT = 4'd8, DONE = 4'd9, ERROR = 4'd10;
 
 // Internal state
 reg [3:0] gen_m, gen_n;
@@ -89,9 +89,14 @@ always @(posedge clk or negedge rst_n) begin
             WAIT_M: begin
                 if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        gen_m <= rx_data[3:0];
-                        clear_rx_buffer <= 1'b1;
-                        sub_state <= WAIT_N;
+                        if (rx_data[3:0] > config_max_dim || rx_data[3:0] == 0) begin
+                            error_code <= `ERR_DIM_RANGE;
+                            sub_state <= ERROR;
+                        end else begin
+                            gen_m <= rx_data[3:0];
+                            clear_rx_buffer <= 1'b1;
+                            sub_state <= WAIT_N;
+                        end
                     end else begin
                         clear_rx_buffer <= 1'b1;
                     end
@@ -101,10 +106,15 @@ always @(posedge clk or negedge rst_n) begin
             WAIT_N: begin
                 if (rx_done) begin
                     if (rx_data >= "0" && rx_data <= "9") begin
-                        gen_n <= rx_data[3:0];
-                        clear_rx_buffer <= 1'b1;
-                        alloc_req <= 1'b1;
-                        sub_state <= ALLOC;
+                        if (rx_data[3:0] > config_max_dim || rx_data[3:0] == 0) begin
+                            error_code <= `ERR_DIM_RANGE;
+                            sub_state <= ERROR;
+                        end else begin
+                            gen_n <= rx_data[3:0];
+                            clear_rx_buffer <= 1'b1;
+                            alloc_req <= 1'b1;
+                            sub_state <= ALLOC;
+                        end
                     end else begin
                         clear_rx_buffer <= 1'b1;
                     end
@@ -179,6 +189,13 @@ always @(posedge clk or negedge rst_n) begin
             
             DONE: begin
                 sub_state <= IDLE;
+            end
+            
+            ERROR: begin
+                if (rx_done) begin
+                    error_code <= `ERR_NONE;
+                    sub_state <= WAIT_M;
+                end
             end
             
             default: sub_state <= IDLE;

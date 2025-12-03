@@ -14,11 +14,14 @@ module matrix_calculator_top_optimized (
     input wire btn_back,     // ��������
     input wire uart_rx,
     output wire uart_tx,
-    output wire [6:0] seg_display, // ע�⣺display_ctrl �ڲ���������?1?7??? wire ����
+    output wire [6:0] seg_display, // ע⣺display_ctrl ڲ?1?7??? wire 
+    output wire [6:0] seg_countdown, // New port for countdown display
     output wire [3:0] led_status,
-    output wire [1:0] seg_select
+    output wire [1:0] seg_select,
+    output wire count_down_select // New port for countdown display selection
 );
 
+    assign count_down_select = 1'b1; // Always enable countdown display
     // ========================================
     // 1. �������� (Debouncing) - �����޸�
     // ========================================
@@ -30,12 +33,12 @@ module matrix_calculator_top_optimized (
     button_debounce db_confirm (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_confirm),  // ԭʼ�����źţ�������������ʱΪ0��
-        .btn_pulse(btn_confirm_pulse) // �����������
+        .btn_pulse(btn_confirm_pulse) // �����������??
     );
     button_debounce db_back (
         .clk(clk), .rst_n(rst_n), 
         .btn_in(btn_back),     // ԭʼ�����ź�
-        .btn_pulse(btn_back_pulse) // �����������
+        .btn_pulse(btn_back_pulse) // �����������??
     );
 
     // ========================================
@@ -117,7 +120,9 @@ wire [3:0] error_code_input, error_code_generate, error_code_display;
 wire [3:0] error_code_compute, error_code_setting;
 reg [3:0] error_code;
 reg error_led;
-reg [25:0] error_timer;
+reg [29:0] error_timer; // Expanded to 30 bits for 7 seconds
+reg error_timeout;
+wire [3:0] countdown_val;
 
 // ========================================
 // Sub-state Signals
@@ -231,26 +236,31 @@ assign query_slot_mux = display_mode_active ? query_slot_display : query_slot_co
 
     always @(*) begin
         main_state_next = main_state;
-        case (main_state)
-            `MAIN_MENU: begin
-                if (btn_confirm_pulse) begin
-                    case (dip_sw)
-                        3'd1: main_state_next = `MODE_INPUT;
-                        3'd2: main_state_next = `MODE_GENERATE;
-                        3'd3: main_state_next = `MODE_DISPLAY;
-                        3'd4: main_state_next = `MODE_COMPUTE;
-                        3'd5: main_state_next = `MODE_SETTING;
-                        default: main_state_next = `MAIN_MENU; 
-                    endcase
+        
+        if (error_timeout) begin
+            main_state_next = `MAIN_MENU;
+        end else begin
+            case (main_state)
+                `MAIN_MENU: begin
+                    if (btn_confirm_pulse) begin
+                        case (dip_sw)
+                            3'd1: main_state_next = `MODE_INPUT;
+                            3'd2: main_state_next = `MODE_GENERATE;
+                            3'd3: main_state_next = `MODE_DISPLAY;
+                            3'd4: main_state_next = `MODE_COMPUTE;
+                            3'd5: main_state_next = `MODE_SETTING;
+                            default: main_state_next = `MAIN_MENU; 
+                        endcase
+                    end
                 end
-            end
-            
-            default: begin 
-                if (btn_back_pulse) begin
-                    main_state_next = `MAIN_MENU;
+                
+                default: begin 
+                    if (btn_back_pulse) begin
+                        main_state_next = `MAIN_MENU;
+                    end
                 end
-            end
-        endcase
+            endcase
+        end
     end
 
 // ========================================
@@ -281,22 +291,39 @@ end
 // ========================================
 // Error Handling with Timer
 // ========================================
+reg countdown_reg;
+
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         error_led <= 1'b0;
-        error_timer <= 26'd0;
+        error_timer <= 30'd0;
+        error_timeout <= 1'b0;
+        countdown_reg <= 4'd7;
     end else begin
         if (error_code != `ERR_NONE) begin
-            if (error_timer < 26'd50_000_000) begin
+            if (error_timer < 30'd700_000_000) begin
                 error_timer <= error_timer + 1'b1;
                 error_led <= 1'b1;
+                error_timeout <= 1'b0;
+                
+                if (error_timer < 30'd100_000_000) countdown_reg <= 4'd7;
+                else if (error_timer < 30'd200_000_000) countdown_reg <= 4'd6;
+                else if (error_timer < 30'd300_000_000) countdown_reg <= 4'd5;
+                else if (error_timer < 30'd400_000_000) countdown_reg <= 4'd4;
+                else if (error_timer < 30'd500_000_000) countdown_reg <= 4'd3;
+                else if (error_timer < 30'd600_000_000) countdown_reg <= 4'd2;
+                else countdown_reg <= 4'd1;
             end else begin
-                error_timer <= 26'd0;
+                error_timer <= 30'd0;
                 error_led <= 1'b0;
+                error_timeout <= 1'b1;
+                countdown_reg <= 4'd0;
             end
         end else begin
-            error_timer <= 26'd0;
+            error_timer <= 30'd0;
             error_led <= 1'b0;
+            error_timeout <= 1'b0;
+            countdown_reg <= 4'd7;
         end
     end
 end
@@ -484,7 +511,7 @@ compute_mode compute_mode_inst (
         .mode_active(compute_mode_active),
         .config_max_dim(config_max_dim),
         
-        // ����������������źţ�?1?7??1?7����ԭʼ������
+        // ����������������źţ�???1?7??1?7����ԭʼ������
         .dip_sw(dip_sw),               
         .btn_confirm(main_state == `MODE_COMPUTE ? btn_confirm_pulse : 1'b0), 
         .selected_op_type(op_type_from_compute), 
@@ -558,12 +585,14 @@ display_ctrl disp_ctrl_inst (
         .rst_n(rst_n),
         .main_state(main_state),
         .sub_state(sub_state),
-        // ���?1?7??? Compute ģʽ����?1?7??? op_type������Ϊ 0
+        // ?1?7??? Compute ģʽ?1?7??? op_typeΪ 0
         .op_type(compute_mode_active ? op_type_from_compute : 4'd0),
         .error_code(error_code),
+        .countdown_val(countdown_val), // Connect countdown value
         .seg_display(seg_display), // ֱ?1?7??? Output Port
+        .seg_countdown(seg_countdown), // New port for countdown display
         .led_status(led_status),
-        .seg_select(seg_select)    // ֱ������?1?7??? Output Port
+        .seg_select(seg_select)    // ֱ?1?7??? Output Port
     );
 
 
