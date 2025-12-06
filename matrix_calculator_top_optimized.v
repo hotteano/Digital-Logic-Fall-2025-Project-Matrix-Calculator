@@ -571,7 +571,7 @@ setting_mode setting_mode_inst (
     .config_matrices_per_size(config_matrices_per_size_from_setting),
     .error_code(error_code_setting),
     .sub_state(sub_state_setting),
-    .btn_confirm(btn_confirm_pulse)
+    .btn_confirm(setting_mode_active ? btn_confirm_pulse : 1'b0)
 );
 
 wire [6:0] display_main;
