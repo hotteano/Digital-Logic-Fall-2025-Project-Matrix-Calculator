@@ -10,8 +10,8 @@ module matrix_op_scalar_mul #(
     input wire start,
     output reg done,
     
-    input wire [3:0] dim_m,
-    input wire [3:0] dim_n,
+    input wire [4:0] dim_m,            // Extended to 5 bits
+    input wire [4:0] dim_n,            // Extended to 5 bits
     input wire [ADDR_WIDTH-1:0] addr_op1,
     input wire [7:0] scalar_val,
     input wire [ADDR_WIDTH-1:0] addr_res,
@@ -26,7 +26,7 @@ module matrix_op_scalar_mul #(
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data
 );
 
-    reg [3:0] i, j;
+    reg [4:0] i, j;  // Extended to 5 bits for dim up to 16
     reg [2:0] state;
     
     localparam S_IDLE = 0, S_READ = 1, S_WAIT = 2, S_WRITE = 3, S_NEXT = 4, S_DONE = 5;

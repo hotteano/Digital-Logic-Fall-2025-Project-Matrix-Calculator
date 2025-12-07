@@ -15,7 +15,7 @@ module generate_mode #(
     input wire mode_active,
     
     // Configuration parameters
-    input wire [3:0] config_max_dim,
+    input wire [4:0] config_max_dim,   // Extended to 5 bits
     input wire [3:0] config_max_value,
     input wire [3:0] random_value,
     
@@ -36,8 +36,8 @@ module generate_mode #(
     input wire alloc_valid,
     output reg commit_req,
     output reg [3:0] commit_slot,
-    output reg [3:0] commit_m,
-    output reg [3:0] commit_n,
+    output reg [4:0] commit_m,          // Extended to 5 bits
+    output reg [4:0] commit_n,          // Extended to 5 bits
     output reg [ADDR_WIDTH-1:0] commit_addr,
     
     // Memory write interface
@@ -60,12 +60,12 @@ localparam IDLE = 4'd0, WAIT_M = 4'd1, WAIT_N = 4'd2,
            COMMIT = 4'd8, DONE = 4'd9;
 
 // Internal state
-reg [3:0] gen_m, gen_n;
+reg [4:0] gen_m, gen_n;       // Extended to 5 bits for dim up to 16
 reg [7:0] gen_count;
 reg [ADDR_WIDTH-1:0] gen_addr;
 reg [3:0] gen_slot;
 reg [3:0] latched_val;
-reg [3:0] col_count;
+reg [4:0] col_count;          // Extended to 5 bits for dim up to 16
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin

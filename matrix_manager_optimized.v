@@ -19,8 +19,8 @@ module matrix_manager_optimized #(
     // Matrix Allocation Interface
     // ========================================
     input wire alloc_req,
-    input wire [3:0] alloc_m,           // requested rows
-    input wire [3:0] alloc_n,           // requested columns
+    input wire [4:0] alloc_m,           // requested rows (extended to 5 bits)
+    input wire [4:0] alloc_n,           // requested columns (extended to 5 bits)
     output reg [3:0] alloc_slot,        // allocated slot index (0-19)
     output reg [11:0] alloc_addr,       // allocated start address in BRAM
     output reg alloc_valid,             // allocation success flag
@@ -30,8 +30,8 @@ module matrix_manager_optimized #(
     // ========================================
     input wire commit_req,
     input wire [3:0] commit_slot,
-    input wire [3:0] commit_m,
-    input wire [3:0] commit_n,
+    input wire [4:0] commit_m,          // extended to 5 bits
+    input wire [4:0] commit_n,          // extended to 5 bits
     input wire [11:0] commit_addr,
     
     // ========================================
@@ -39,8 +39,8 @@ module matrix_manager_optimized #(
     // ========================================
     input wire [3:0] query_slot,
     output wire query_valid,
-    output wire [3:0] query_m,
-    output wire [3:0] query_n,
+    output wire [4:0] query_m,          // extended to 5 bits
+    output wire [4:0] query_n,          // extended to 5 bits
     output wire [11:0] query_addr,
     output wire [7:0] query_element_count,
     
@@ -55,8 +55,8 @@ module matrix_manager_optimized #(
 // These are small tables, so distributed RAM is fine
 // ========================================
 (* ram_style = "distributed" *) reg matrix_valid [0:MAX_STORAGE_MATRICES-1];
-(* ram_style = "distributed" *) reg [3:0] matrix_rows [0:MAX_STORAGE_MATRICES-1];
-(* ram_style = "distributed" *) reg [3:0] matrix_cols [0:MAX_STORAGE_MATRICES-1];
+(* ram_style = "distributed" *) reg [4:0] matrix_rows [0:MAX_STORAGE_MATRICES-1];  // extended to 5 bits
+(* ram_style = "distributed" *) reg [4:0] matrix_cols [0:MAX_STORAGE_MATRICES-1];  // extended to 5 bits
 (* ram_style = "distributed" *) reg [11:0] matrix_start_addr [0:MAX_STORAGE_MATRICES-1];
 (* ram_style = "distributed" *) reg [11:0] matrix_end_addr [0:MAX_STORAGE_MATRICES-1];
 

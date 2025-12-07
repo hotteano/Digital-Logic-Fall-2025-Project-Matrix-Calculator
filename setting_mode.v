@@ -25,9 +25,9 @@ module setting_mode #(
     input wire tx_busy,
     
     // Configuration output
-    output reg [7:0] config_max_dim,
-    output reg [3:0] config_max_value,
-    output reg [3:0] config_matrices_per_size,
+    output reg [4:0] config_max_dim,
+    output reg [4:0] config_max_value,
+    output reg [4:0] config_matrices_per_size,
     
     // Error and state output
     output reg [3:0] error_code,

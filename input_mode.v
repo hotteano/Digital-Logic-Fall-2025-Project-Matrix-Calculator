@@ -16,7 +16,7 @@ module input_mode #(
     input wire mode_active,
     
     // Configuration parameters
-    input wire [3:0] config_max_dim,
+    input wire [4:0] config_max_dim,   // Extended to 5 bits
     input wire [3:0] config_max_value,
     
     // UART receive interface
@@ -31,15 +31,15 @@ module input_mode #(
     
     // Matrix manager interface
     output reg alloc_req,
-    output reg [3:0] alloc_m,
-    output reg [3:0] alloc_n,
+    output reg [4:0] alloc_m,           // Extended to 5 bits
+    output reg [4:0] alloc_n,           // Extended to 5 bits
     input wire [3:0] alloc_slot,
     input wire [ADDR_WIDTH-1:0] alloc_addr,
     input wire alloc_valid,
     output reg commit_req,
     output reg [3:0] commit_slot,
-    output reg [3:0] commit_m,
-    output reg [3:0] commit_n,
+    output reg [4:0] commit_m,          // Extended to 5 bits
+    output reg [4:0] commit_n,          // Extended to 5 bits
     output reg [ADDR_WIDTH-1:0] commit_addr,
     
     // Memory write interface
@@ -74,7 +74,7 @@ localparam IDLE = 4'd0,
 
 // Streaming parse registers
 reg [7:0] parse_accum;        // Accumulator for multi-digit number (e.g., "12" -> 12)
-reg [3:0] input_m, input_n;
+reg [4:0] input_m, input_n;   // Extended to 5 bits for dim up to 16
 reg [7:0] total_elements;     // Pre-computed M*N to avoid repeated multiply
 reg [7:0] elements_written;   // Count of elements written to BRAM
 reg [3:0] input_matrix_slot;
@@ -82,8 +82,8 @@ reg [ADDR_WIDTH-1:0] input_alloc_addr;
 reg digit_received; // Flag to track if we are currently parsing a number
 
 // Display formatting registers
-reg [3:0] display_row;        // Current row being displayed
-reg [3:0] display_col;        // Current column being displayed
+reg [4:0] display_row;        // Current row being displayed (extended to 5 bits)
+reg [4:0] display_col;        // Current column being displayed (extended to 5 bits)
 reg [3:0] display_step;       // Sub-state for formatting (0=newline, 1=space, 2=digit)
 reg [ELEMENT_WIDTH-1:0] display_value;  // Current element value to display
 

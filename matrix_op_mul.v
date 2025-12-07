@@ -10,9 +10,9 @@ module matrix_op_mul #(
     input wire start,
     output reg done,
     
-    input wire [3:0] dim_m, // Rows of A
-    input wire [3:0] dim_n, // Cols of B
-    input wire [3:0] dim_p, // Cols of A / Rows of B
+    input wire [4:0] dim_m, // Rows of A (extended to 5 bits)
+    input wire [4:0] dim_n, // Cols of B (extended to 5 bits)
+    input wire [4:0] dim_p, // Cols of A / Rows of B (extended to 5 bits)
     
     input wire [ADDR_WIDTH-1:0] addr_op1, // Matrix A
     input wire [ADDR_WIDTH-1:0] addr_op2, // Matrix B
@@ -28,7 +28,7 @@ module matrix_op_mul #(
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data
 );
 
-    reg [3:0] i, j, k;
+    reg [4:0] i, j, k;  // Extended to 5 bits for dim up to 16
     reg [3:0] state;
     reg [15:0] acc; // Accumulator
     reg [ELEMENT_WIDTH-1:0] val_a;

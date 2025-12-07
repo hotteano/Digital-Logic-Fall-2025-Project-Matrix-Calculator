@@ -13,7 +13,7 @@ module compute_mode #(
     input wire clk,
     input wire rst_n,
     input wire mode_active,
-    input wire [3:0] config_max_dim,
+    input wire [4:0] config_max_dim,    // Extended to 5 bits
 
     // DIP switches and buttons
     input wire [2:0] dip_sw,
@@ -32,23 +32,23 @@ module compute_mode #(
     input wire [7:0] total_matrix_count,
     output reg [3:0] query_slot,
     input wire query_valid,
-    input wire [3:0] query_m,
-    input wire [3:0] query_n,
+    input wire [4:0] query_m,           // Extended to 5 bits
+    input wire [4:0] query_n,           // Extended to 5 bits
     input wire [ADDR_WIDTH-1:0] query_addr,
     input wire [7:0] query_element_count,
     
     // Allocation/Commit Interface
     output reg alloc_req,
-    output reg [3:0] alloc_m,
-    output reg [3:0] alloc_n,
+    output reg [4:0] alloc_m,           // Extended to 5 bits
+    output reg [4:0] alloc_n,           // Extended to 5 bits
     input wire [3:0] alloc_slot,
     input wire [ADDR_WIDTH-1:0] alloc_addr,
     input wire alloc_valid,
     
     output reg commit_req,
     output reg [3:0] commit_slot,
-    output reg [3:0] commit_m,
-    output reg [3:0] commit_n,
+    output reg [4:0] commit_m,          // Extended to 5 bits
+    output reg [4:0] commit_n,          // Extended to 5 bits
     output reg [ADDR_WIDTH-1:0] commit_addr,
     
     // Memory interface
@@ -89,15 +89,16 @@ wire btn_posedge = btn_confirm && !btn_prev;
 // Registers for SELECT_MATRIX logic
 reg [5:0] sel_step;
 reg [4:0] scan_slot;
-reg [3:0] iter_m, iter_n;
+reg [4:0] iter_m, iter_n;     // Extended to 5 bits
 reg [7:0] current_count;
-reg [3:0] target_m, target_n;
-reg [3:0] op1_m, op1_n; // New registers to store Op1 dimensions
+reg [4:0] target_m, target_n; // Extended to 5 bits
+reg [4:0] op1_m, op1_n;       // Extended to 5 bits
 reg [3:0] op1_slot, op2_slot;
 reg [7:0] scalar_val;
 reg [7:0] match_idx;
 reg [7:0] user_sel_idx;
-reg [3:0] print_r, print_c;
+reg [4:0] print_r, print_c;   // Extended to 5 bits for dimensions up to 16
+reg [7:0] input_accum; // Accumulator for multi-digit input
 reg [3:0] print_step;
 reg [11:0] print_addr;
 
@@ -270,6 +271,7 @@ always @(posedge clk or negedge rst_n) begin
                         scan_slot <= 0;
                         current_count <= 0;
                         sel_step <= 5'd1;
+                        input_accum <= 0;
                     end
                     
                     5'd1: begin // Set query
@@ -282,8 +284,12 @@ always @(posedge clk or negedge rst_n) begin
                             current_count <= current_count + 1;
                             
                         if (scan_slot == 15) begin 
-                            if (current_count > 0) sel_step <= 5'd3; 
-                            else sel_step <= 5'd4; 
+                            if (current_count > 0) begin
+                                sel_step <= 5'd3;
+                                print_step <= 0; // Reset print_step before printing
+                            end else begin
+                                sel_step <= 5'd4;
+                            end
                         end else begin
                             scan_slot <= scan_slot + 1;
                             sel_step <= 5'd1;
@@ -293,13 +299,39 @@ always @(posedge clk or negedge rst_n) begin
                     5'd3: begin // Print "M N : C"
                         if (!tx_busy) begin
                             case (print_step)
-                                0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
+                                0: begin 
+                                    if (iter_m >= 10) begin
+                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; print_step <= 9; 
+                                    end else begin
+                                        tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; 
+                                    end
+                                end
+                                9: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; print_step <= 1; end
+
                                 1: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 2; end
-                                2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
+                                
+                                2: begin 
+                                    if (iter_n >= 10) begin
+                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; print_step <= 10; 
+                                    end else begin
+                                        tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; 
+                                    end
+                                end
+                                10: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; print_step <= 3; end
+
                                 3: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 4; end
                                 4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
                                 5: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 6; end
-                                6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
+                                
+                                6: begin 
+                                    if (current_count >= 10) begin
+                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; print_step <= 11;
+                                    end else begin
+                                        tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; 
+                                    end
+                                end
+                                11: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; print_step <= 7; end
+
                                 7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
                                 8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 5'd4; end 
                             endcase
@@ -318,6 +350,7 @@ always @(posedge clk or negedge rst_n) begin
                             sel_step <= 5'd1;
                         end else begin
                             sel_step <= 5'd5; 
+                            input_accum <= 0;
                         end
                     end
 
@@ -325,17 +358,24 @@ always @(posedge clk or negedge rst_n) begin
                     5'd5: begin 
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
-                                end else begin
-                                    target_m <= rx_data - "0";
-                                    sel_step <= 5'd6;
-                                    error_code <= `ERR_NONE;
+                                    input_accum <= 0;
                                 end
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum > 0 && input_accum <= config_max_dim) begin
+                                    target_m <= input_accum[3:0];
+                                    sel_step <= 5'd6;
+                                    input_accum <= 0;
+                                    error_code <= `ERR_NONE;
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
+                                end
                             end
                         end
                     end
@@ -343,19 +383,26 @@ always @(posedge clk or negedge rst_n) begin
                     5'd6: begin 
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
-                                end else begin
-                                    target_n <= rx_data - "0";
+                                    input_accum <= 0;
+                                end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum > 0 && input_accum <= config_max_dim) begin
+                                    target_n <= input_accum[3:0];
                                     sel_step <= 5'd7;
                                     scan_slot <= 0;
                                     match_idx <= 1;
+                                    input_accum <= 0;
                                     error_code <= `ERR_NONE;
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
                                 end
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
                     end
@@ -446,7 +493,7 @@ always @(posedge clk or negedge rst_n) begin
                              end
                         end else begin
                              if (!tx_busy) begin
-                                 tx_data <= " "; // Space between elements
+                                 tx_data <= 8'h20; // Space between elements
                                  tx_start <= 1;
                                  print_c <= print_c + 1;
                                  sel_step <= 5'd10;
@@ -554,8 +601,12 @@ always @(posedge clk or negedge rst_n) begin
                             current_count <= current_count + 1;
                             
                         if (scan_slot == 15) begin 
-                            if (current_count > 0) sel_step <= 6'd47; 
-                            else sel_step <= 6'd48; 
+                            if (current_count > 0) begin
+                                sel_step <= 6'd47;
+                                print_step <= 0; // Reset print_step before printing
+                            end else begin
+                                sel_step <= 6'd48;
+                            end
                         end else begin
                             scan_slot <= scan_slot + 1;
                             sel_step <= 6'd45;
@@ -565,13 +616,39 @@ always @(posedge clk or negedge rst_n) begin
                     6'd47: begin // Print "M N : C"
                         if (!tx_busy) begin
                             case (print_step)
-                                0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
+                                0: begin 
+                                    if (iter_m >= 10) begin
+                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; print_step <= 9; 
+                                    end else begin
+                                        tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; 
+                                    end
+                                end
+                                9: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; print_step <= 1; end
+
                                 1: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 2; end
-                                2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
+                                
+                                2: begin 
+                                    if (iter_n >= 10) begin
+                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; print_step <= 10; 
+                                    end else begin
+                                        tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; 
+                                    end
+                                end
+                                10: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; print_step <= 3; end
+
                                 3: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 4; end
                                 4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
                                 5: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 6; end
-                                6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
+                                
+                                6: begin 
+                                    if (current_count >= 10) begin
+                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; print_step <= 11;
+                                    end else begin
+                                        tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; 
+                                    end
+                                end
+                                11: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; print_step <= 7; end
+
                                 7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
                                 8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 6'd48; end 
                             endcase
@@ -590,38 +667,32 @@ always @(posedge clk or negedge rst_n) begin
                             sel_step <= 6'd45;
                         end else begin
                             sel_step <= 6'd49; // Wait for Op2 Dims
+                            input_accum <= 0;
                         end
                     end
 
                     6'd49: begin // Wait Op2 M
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                // For Mul, Op2 M must match Op1 N (target_n)
-                                // But user might input it anyway. We can check or overwrite.
-                                // Let's overwrite target_m/n for Op2 selection context
-                                // Store Op1 dims if needed? Op1 slot is stored.
-                                // target_m <= rx_data - "0"; // User input M
-                                // Actually for Mul: Op1 is (M x N), Op2 must be (N x P)
-                                // So Op2 M MUST be equal to Op1 N.
-                                // We can skip asking for M, or ask and verify.
-                                // Let's ask for P (Op2 N).
-                                // But to be consistent with UI, maybe ask both?
-                                // Let's assume user inputs M then N.
-                                if ((rx_data - "0") == target_n) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
+                                end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum == target_n) begin
                                     // Valid M for Op2
                                     sel_step <= 6'd50;
                                     error_code <= `ERR_NONE;
+                                    input_accum <= 0;
                                 end else begin
-                                    // Invalid M for Mul, maybe error or retry?
-                                    // For now, just retry
-                                    // sel_step <= 6'd49;
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
                                 end
                                 clear_rx_buffer <= 1;
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
                     end
@@ -635,20 +706,27 @@ always @(posedge clk or negedge rst_n) begin
                     6'd51: begin
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
-                                end else begin
+                                    input_accum <= 0;
+                                end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum > 0 && input_accum <= config_max_dim) begin
                                     target_m <= target_n; // Op2 M = Op1 N
-                                    target_n <= rx_data - "0"; // Op2 N = P
+                                    target_n <= input_accum[3:0]; // Op2 N = P
                                     sel_step <= 6'd52;
                                     scan_slot <= 0;
                                     match_idx <= 1;
+                                    input_accum <= 0;
                                     error_code <= `ERR_NONE;
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
                                 end
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
                     end
@@ -982,8 +1060,12 @@ always @(posedge clk or negedge rst_n) begin
                             tx_start <= 1;
                             print_c <= 0;
                             if (print_r == target_m - 1) begin
-                                // Op2 Done.
-                                sel_step <= 6'd20;
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) sel_step <= 6'd42; // Go to Wait Sel 2
+                                else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 6'd52;
+                                end
                             end else begin
                                 print_r <= print_r + 1;
                                 sel_step <= 6'd34; 
