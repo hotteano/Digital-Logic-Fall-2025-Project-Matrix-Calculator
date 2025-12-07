@@ -133,6 +133,7 @@ module matrix_op_conv #(
                         state <= S_CHECK_BOUNDS;
                     end
                 end
+                //Inside the kernel, j move from 0 to 2, and then go to 0, repeat for 3 times
                 
                 S_WRITE: begin
                     mem_wr_en <= 1;
