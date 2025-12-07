@@ -34,11 +34,11 @@ module display_ctrl (
     // 特殊字符定义 (依据 PDF)
     // T (Transpose): E,F,A,B -> 像 't' (0000111) 容易混淆，通常用 F,E,D,G (0111000) -> 't' 或 E,F,A (1110000) -> '7'?
     // 建议：
-    localparam CHAR_T = 7'b0111100; // Display 'T'
-    localparam CHAR_A = 7'b0111011; // Display 'A'
+    localparam CHAR_T = 7'b1111000; // Display 'T'
+    localparam CHAR_A = 7'b1110111; // Display 'A'
     localparam CHAR_S = 7'b1101101; // Display 'S'
-    localparam CHAR_M = 7'b0111001; // Display 'M'
-    localparam CHAR_C = 7'b1001110; // Display 'C'
+    localparam CHAR_M = 7'b0110111; // Display 'M'
+    localparam CHAR_C = 7'b0111001; // Display 'C'
 
     reg [6:0] disp_data_mode;
     reg [6:0] disp_data_op;
