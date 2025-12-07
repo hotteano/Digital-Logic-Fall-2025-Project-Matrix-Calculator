@@ -10,8 +10,8 @@ module matrix_op_conv #(
     input wire start,
     output reg done,
     
-    input wire [3:0] dim_m, // Rows of A
-    input wire [3:0] dim_n, // Cols of A
+    input wire [4:0] dim_m, // Rows of A (extended to 5 bits)
+    input wire [4:0] dim_n, // Cols of A (extended to 5 bits)
     
     input wire [ADDR_WIDTH-1:0] addr_op1, // Matrix A (Image)
     input wire [ADDR_WIDTH-1:0] addr_op2, // Matrix B (Kernel 3x3)
@@ -27,7 +27,7 @@ module matrix_op_conv #(
     output reg [ELEMENT_WIDTH-1:0] mem_wr_data
 );
 
-    reg [3:0] i, j;
+    reg [4:0] i, j;  // Extended to 5 bits for dim up to 16
     reg [3:0] ki, kj; // Kernel indices 0..2
     reg [3:0] state;
     reg [15:0] acc;

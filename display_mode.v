@@ -26,8 +26,8 @@ module display_mode #(
     input wire [7:0] total_matrix_count,
     output reg [3:0] query_slot,
     input wire query_valid,
-    input wire [3:0] query_m,
-    input wire [3:0] query_n,
+    input wire [4:0] query_m,           // Extended to 5 bits
+    input wire [4:0] query_n,           // Extended to 5 bits
     input wire [ADDR_WIDTH-1:0] query_addr,
     input wire [7:0] query_element_count,
     
@@ -46,7 +46,7 @@ localparam IDLE = 4'd0, SHOW_COUNT = 4'd1, WAIT_SELECT = 4'd2,
            READ_DATA = 4'd3, CONVERT_DATA = 4'd4, SEND_DIGITS = 4'd5, DONE = 4'd6;
 
 // Internal variables
-reg [3:0] display_m, display_n;
+reg [4:0] display_m, display_n;  // Extended to 5 bits for dim up to 16
 reg [7:0] display_count; // Current element index
 reg [7:0] bin_value;     // Latch data from memory
 reg [1:0] digit_index;   // 0:Hundreds, 1:Tens, 2:Units, 3:Space

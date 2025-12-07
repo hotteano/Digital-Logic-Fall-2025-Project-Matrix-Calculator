@@ -57,10 +57,10 @@ module matrix_calculator_top_optimized (
 // ========================================
 // Configuration Parameters
 // ========================================
-wire [3:0] config_max_dim_from_setting, config_max_value_from_setting, config_matrices_per_size_from_setting;
+wire [4:0] config_max_dim_from_setting, config_max_value_from_setting, config_matrices_per_size_from_setting;
 
 // Use setting values when in SETTING mode, otherwise use defaults
-reg [3:0] config_max_dim, config_max_value, config_matrices_per_size;
+reg [4:0] config_max_dim, config_max_value, config_matrices_per_size;
 
 always @(*) begin
     config_max_dim = config_max_dim_from_setting;
@@ -89,15 +89,15 @@ wire [`ELEMENT_WIDTH-1:0] mem_a_din, mem_a_dout, mem_b_dout;
 // Matrix Manager Interface Signals
 // ========================================
 wire alloc_req_mux, commit_req_mux;
-wire [3:0] alloc_m_mux, alloc_n_mux;
+wire [4:0] alloc_m_mux, alloc_n_mux;  // Extended to 5 bits
 wire [3:0] alloc_slot, commit_slot_mux;
 wire [`BRAM_ADDR_WIDTH-1:0] alloc_addr, commit_addr_mux;
 wire alloc_valid;
-wire [3:0] commit_m_mux, commit_n_mux;
+wire [4:0] commit_m_mux, commit_n_mux;  // Extended to 5 bits
 
 wire [3:0] query_slot_mux;
 wire query_valid;
-wire [3:0] query_m, query_n;
+wire [4:0] query_m, query_n;  // Extended to 5 bits
 wire [`BRAM_ADDR_WIDTH-1:0] query_addr;
 wire [7:0] query_element_count;
 wire [7:0] total_matrix_count;
@@ -179,8 +179,9 @@ wire [`BRAM_ADDR_WIDTH-1:0] mem_rd_addr_display, mem_rd_addr_compute;
 
 // New wires for Compute Mode Write/Alloc
 wire alloc_req_compute, commit_req_compute;
-wire [3:0] alloc_m_compute, alloc_n_compute;
-wire [3:0] commit_slot_compute, commit_m_compute, commit_n_compute;
+wire [4:0] alloc_m_compute, alloc_n_compute;  // Extended to 5 bits
+wire [3:0] commit_slot_compute;
+wire [4:0] commit_m_compute, commit_n_compute;  // Extended to 5 bits
 wire [`BRAM_ADDR_WIDTH-1:0] commit_addr_compute;
 wire mem_wr_en_compute;
 wire [`BRAM_ADDR_WIDTH-1:0] mem_wr_addr_compute;
@@ -193,10 +194,10 @@ wire [`ELEMENT_WIDTH-1:0] mem_rd_data = mem_a_dout;
 // Matrix Manager Allocation Multiplexing
 // ========================================
 wire alloc_req_input, alloc_req_generate;
-wire [3:0] alloc_m_input, alloc_n_input, alloc_m_generate, alloc_n_generate;
+wire [4:0] alloc_m_input, alloc_n_input, alloc_m_generate, alloc_n_generate;  // Extended to 5 bits
 wire commit_req_input, commit_req_generate;
 wire [3:0] commit_slot_input, commit_slot_generate;
-wire [3:0] commit_m_input, commit_n_input, commit_m_generate, commit_n_generate;
+wire [4:0] commit_m_input, commit_n_input, commit_m_generate, commit_n_generate;  // Extended to 5 bits
 wire [`BRAM_ADDR_WIDTH-1:0] commit_addr_input, commit_addr_generate;
 
 assign alloc_req_mux = alloc_req_input | alloc_req_generate | alloc_req_compute;

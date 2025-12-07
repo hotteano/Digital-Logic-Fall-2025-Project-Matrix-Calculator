@@ -13,7 +13,7 @@ module compute_mode #(
     input wire clk,
     input wire rst_n,
     input wire mode_active,
-    input wire [3:0] config_max_dim,
+    input wire [4:0] config_max_dim,    // Extended to 5 bits
 
     // DIP switches and buttons
     input wire [2:0] dip_sw,
@@ -32,23 +32,23 @@ module compute_mode #(
     input wire [7:0] total_matrix_count,
     output reg [3:0] query_slot,
     input wire query_valid,
-    input wire [3:0] query_m,
-    input wire [3:0] query_n,
+    input wire [4:0] query_m,           // Extended to 5 bits
+    input wire [4:0] query_n,           // Extended to 5 bits
     input wire [ADDR_WIDTH-1:0] query_addr,
     input wire [7:0] query_element_count,
     
     // Allocation/Commit Interface
     output reg alloc_req,
-    output reg [3:0] alloc_m,
-    output reg [3:0] alloc_n,
+    output reg [4:0] alloc_m,           // Extended to 5 bits
+    output reg [4:0] alloc_n,           // Extended to 5 bits
     input wire [3:0] alloc_slot,
     input wire [ADDR_WIDTH-1:0] alloc_addr,
     input wire alloc_valid,
     
     output reg commit_req,
     output reg [3:0] commit_slot,
-    output reg [3:0] commit_m,
-    output reg [3:0] commit_n,
+    output reg [4:0] commit_m,          // Extended to 5 bits
+    output reg [4:0] commit_n,          // Extended to 5 bits
     output reg [ADDR_WIDTH-1:0] commit_addr,
     
     // Memory interface
@@ -87,19 +87,21 @@ reg btn_prev;
 wire btn_posedge = btn_confirm && !btn_prev;
 
 // Registers for SELECT_MATRIX logic
-reg [5:0] sel_step;
+reg [6:0] sel_step;
 reg [4:0] scan_slot;
-reg [3:0] iter_m, iter_n;
+reg [4:0] iter_m, iter_n;     // Extended to 5 bits
 reg [7:0] current_count;
-reg [3:0] target_m, target_n;
-reg [3:0] op1_m, op1_n; // New registers to store Op1 dimensions
+reg [4:0] target_m, target_n; // Extended to 5 bits
+reg [4:0] op1_m, op1_n;       // Extended to 5 bits
 reg [3:0] op1_slot, op2_slot;
 reg [7:0] scalar_val;
 reg [7:0] match_idx;
 reg [7:0] user_sel_idx;
-reg [3:0] print_r, print_c;
+reg [4:0] print_r, print_c;   // Extended to 5 bits for dimensions up to 16
+reg [7:0] input_accum; // Accumulator for multi-digit input
 reg [3:0] print_step;
 reg [11:0] print_addr;
+reg tx_pending; // Flag to prevent double-sending before tx_busy goes high
 
 // Registers for EXECUTE/SEND_RESULT
 reg [7:0] res_send_idx;
@@ -158,7 +160,7 @@ matrix_op_transpose op_trans_inst (
 
 matrix_op_mul op_mul_inst (
     .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_MUL), .done(done_mul),
-    .dim_m(target_m), .dim_n(target_n), .dim_p(target_n), 
+    .dim_m(op1_m), .dim_n(target_n), .dim_p(op1_n), 
     .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
     .mem_rd_en(op_rd_en_mul), .mem_rd_addr(op_rd_addr_mul), .mem_rd_data(mem_rd_data),
     .mem_wr_en(op_wr_en_mul), .mem_wr_addr(op_wr_addr_mul), .mem_wr_data(op_wr_data_mul)
@@ -166,7 +168,7 @@ matrix_op_mul op_mul_inst (
 
 matrix_op_conv op_conv_inst (
     .clk(clk), .rst_n(rst_n), .start(start_op && selected_op_type == OP_CONV), .done(done_conv),
-    .dim_m(target_m), .dim_n(target_n),
+    .dim_m(op1_m), .dim_n(op1_n),
     .addr_op1(addr_op1_reg), .addr_op2(addr_op2_reg), .addr_res(addr_res_reg),
     .mem_rd_en(op_rd_en_conv), .mem_rd_addr(op_rd_addr_conv), .mem_rd_data(mem_rd_data),
     .mem_wr_en(op_wr_en_conv), .mem_wr_addr(op_wr_addr_conv), .mem_wr_data(op_wr_data_conv)
@@ -224,10 +226,13 @@ always @(posedge clk or negedge rst_n) begin
         alloc_req <= 0;
         commit_req <= 0;
         start_op <= 0;
+        tx_pending <= 1'b0;
     end else if (mode_active) begin
         btn_prev <= btn_confirm;
         tx_start <= 1'b0;
         internal_rd_en <= 1'b0;
+        // Clear tx_pending when tx_busy goes high (UART acknowledged)
+        if (tx_busy) tx_pending <= 1'b0;
         alloc_req <= 0;
         commit_req <= 0;
         start_op <= 0;
@@ -270,6 +275,7 @@ always @(posedge clk or negedge rst_n) begin
                         scan_slot <= 0;
                         current_count <= 0;
                         sel_step <= 5'd1;
+                        input_accum <= 0;
                     end
                     
                     5'd1: begin // Set query
@@ -282,8 +288,12 @@ always @(posedge clk or negedge rst_n) begin
                             current_count <= current_count + 1;
                             
                         if (scan_slot == 15) begin 
-                            if (current_count > 0) sel_step <= 5'd3; 
-                            else sel_step <= 5'd4; 
+                            if (current_count > 0) begin
+                                sel_step <= 5'd3;
+                                print_step <= 0; // Reset print_step before printing
+                            end else begin
+                                sel_step <= 5'd4;
+                            end
                         end else begin
                             scan_slot <= scan_slot + 1;
                             sel_step <= 5'd1;
@@ -291,17 +301,43 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     5'd3: begin // Print "M N : C"
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             case (print_step)
-                                0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
-                                1: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 2; end
-                                2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
-                                3: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 4; end
-                                4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
-                                5: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 6; end
-                                6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
-                                7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
-                                8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 5'd4; end 
+                                0: begin 
+                                    if (iter_m >= 10) begin
+                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 9; 
+                                    end else begin
+                                        tx_data <= iter_m + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; 
+                                    end
+                                end
+                                9: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+
+                                1: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                
+                                2: begin 
+                                    if (iter_n >= 10) begin
+                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 10; 
+                                    end else begin
+                                        tx_data <= iter_n + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; 
+                                    end
+                                end
+                                10: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
+
+                                3: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 4; end
+                                4: begin tx_data <= ":"; tx_start <= 1; tx_pending <= 1; print_step <= 5; end
+                                5: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 6; end
+                                
+                                6: begin 
+                                    if (current_count >= 10) begin
+                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 11;
+                                    end else begin
+                                        tx_data <= current_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; 
+                                    end
+                                end
+                                11: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; end
+
+                                7: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 8; end 
+                                8: begin tx_data <= 8'h0A; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd4; end 
                             endcase
                         end
                     end
@@ -318,6 +354,7 @@ always @(posedge clk or negedge rst_n) begin
                             sel_step <= 5'd1;
                         end else begin
                             sel_step <= 5'd5; 
+                            input_accum <= 0;
                         end
                     end
 
@@ -325,17 +362,24 @@ always @(posedge clk or negedge rst_n) begin
                     5'd5: begin 
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
-                                end else begin
-                                    target_m <= rx_data - "0";
-                                    sel_step <= 5'd6;
-                                    error_code <= `ERR_NONE;
+                                    input_accum <= 0;
                                 end
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum > 0 && input_accum <= config_max_dim) begin
+                                    target_m <= input_accum[3:0];
+                                    sel_step <= 5'd6;
+                                    input_accum <= 0;
+                                    error_code <= `ERR_NONE;
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
+                                end
                             end
                         end
                     end
@@ -343,19 +387,26 @@ always @(posedge clk or negedge rst_n) begin
                     5'd6: begin 
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
-                                end else begin
-                                    target_n <= rx_data - "0";
+                                    input_accum <= 0;
+                                end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum > 0 && input_accum <= config_max_dim) begin
+                                    target_n <= input_accum[3:0];
                                     sel_step <= 5'd7;
                                     scan_slot <= 0;
                                     match_idx <= 1;
+                                    input_accum <= 0;
                                     error_code <= `ERR_NONE;
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
                                 end
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
                     end
@@ -382,25 +433,28 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     5'd9: begin // Print Index
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= match_idx + "0"; 
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 5'd21; // Send Newline
                         end
                     end
 
                     5'd21: begin // Send Newline after Index
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0D; // CR
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 5'd23;
                         end
                     end
 
                     5'd23: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 5'd10;
                         end
                     end
@@ -417,21 +471,22 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     5'd12: begin // Send Element
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             if (mem_rd_data >= 100) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
-                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 5'd22; end
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd22; end
                                 endcase
                             end else if (mem_rd_data >= 10) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 5'd22; end
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 5'd22; end
                                 endcase
                             end else begin
                                 tx_data <= mem_rd_data + "0";
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 sel_step <= 5'd22;
                             end
                         end
@@ -439,15 +494,17 @@ always @(posedge clk or negedge rst_n) begin
 
                     5'd22: begin // Check Row End
                         if (print_c == target_n - 1) begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= 8'h0D; // CR
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  sel_step <= 5'd24;
                              end
                         end else begin
-                             if (!tx_busy) begin
-                                 tx_data <= " "; // Space between elements
+                             if (!tx_busy && !tx_pending) begin
+                                 tx_data <= 8'h20; // Space between elements
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  print_c <= print_c + 1;
                                  sel_step <= 5'd10;
                              end
@@ -455,9 +512,10 @@ always @(posedge clk or negedge rst_n) begin
                     end
 
                     5'd24: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == target_m - 1) begin
                                 match_idx <= match_idx + 1;
@@ -508,6 +566,10 @@ always @(posedge clk or negedge rst_n) begin
                                     // For Matrix Mul, we need to select 2nd matrix with potentially different dims
                                     // Reset stats and go to stats phase for 2nd operand
                                     sel_step <= 6'd44; 
+                                end else if (selected_op_type == OP_CONV) begin
+                                    // For Convolution, kernel is fixed 3x3
+                                    // Wait for rx_done to clear, then go to select kernel
+                                    sel_step <= 6'd70;
                                 end else begin
                                     sel_step <= 6'd42; // Wait RX low then 16
                                 end
@@ -554,8 +616,12 @@ always @(posedge clk or negedge rst_n) begin
                             current_count <= current_count + 1;
                             
                         if (scan_slot == 15) begin 
-                            if (current_count > 0) sel_step <= 6'd47; 
-                            else sel_step <= 6'd48; 
+                            if (current_count > 0) begin
+                                sel_step <= 6'd47;
+                                print_step <= 0; // Reset print_step before printing
+                            end else begin
+                                sel_step <= 6'd48;
+                            end
                         end else begin
                             scan_slot <= scan_slot + 1;
                             sel_step <= 6'd45;
@@ -563,17 +629,43 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     6'd47: begin // Print "M N : C"
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             case (print_step)
-                                0: begin tx_data <= iter_m + "0"; tx_start <= 1; print_step <= 1; end
-                                1: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 2; end
-                                2: begin tx_data <= iter_n + "0"; tx_start <= 1; print_step <= 3; end
-                                3: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 4; end
-                                4: begin tx_data <= ":"; tx_start <= 1; print_step <= 5; end
-                                5: begin tx_data <= 8'h20; tx_start <= 1; print_step <= 6; end
-                                6: begin tx_data <= current_count + "0"; tx_start <= 1; print_step <= 7; end
-                                7: begin tx_data <= 8'h0D; tx_start <= 1; print_step <= 8; end 
-                                8: begin tx_data <= 8'h0A; tx_start <= 1; print_step <= 0; sel_step <= 6'd48; end 
+                                0: begin 
+                                    if (iter_m >= 10) begin
+                                        tx_data <= (iter_m / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 9; 
+                                    end else begin
+                                        tx_data <= iter_m + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; 
+                                    end
+                                end
+                                9: begin tx_data <= (iter_m % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+
+                                1: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                
+                                2: begin 
+                                    if (iter_n >= 10) begin
+                                        tx_data <= (iter_n / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 10; 
+                                    end else begin
+                                        tx_data <= iter_n + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; 
+                                    end
+                                end
+                                10: begin tx_data <= (iter_n % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 3; end
+
+                                3: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 4; end
+                                4: begin tx_data <= ":"; tx_start <= 1; tx_pending <= 1; print_step <= 5; end
+                                5: begin tx_data <= 8'h20; tx_start <= 1; tx_pending <= 1; print_step <= 6; end
+                                
+                                6: begin 
+                                    if (current_count >= 10) begin
+                                        tx_data <= (current_count / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 11;
+                                    end else begin
+                                        tx_data <= current_count + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; 
+                                    end
+                                end
+                                11: begin tx_data <= (current_count % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 7; end
+
+                                7: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 8; end 
+                                8: begin tx_data <= 8'h0A; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd48; end 
                             endcase
                         end
                     end
@@ -590,38 +682,32 @@ always @(posedge clk or negedge rst_n) begin
                             sel_step <= 6'd45;
                         end else begin
                             sel_step <= 6'd49; // Wait for Op2 Dims
+                            input_accum <= 0;
                         end
                     end
 
                     6'd49: begin // Wait Op2 M
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                // For Mul, Op2 M must match Op1 N (target_n)
-                                // But user might input it anyway. We can check or overwrite.
-                                // Let's overwrite target_m/n for Op2 selection context
-                                // Store Op1 dims if needed? Op1 slot is stored.
-                                // target_m <= rx_data - "0"; // User input M
-                                // Actually for Mul: Op1 is (M x N), Op2 must be (N x P)
-                                // So Op2 M MUST be equal to Op1 N.
-                                // We can skip asking for M, or ask and verify.
-                                // Let's ask for P (Op2 N).
-                                // But to be consistent with UI, maybe ask both?
-                                // Let's assume user inputs M then N.
-                                if ((rx_data - "0") == target_n) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
+                                end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum == target_n) begin
                                     // Valid M for Op2
                                     sel_step <= 6'd50;
                                     error_code <= `ERR_NONE;
+                                    input_accum <= 0;
                                 end else begin
-                                    // Invalid M for Mul, maybe error or retry?
-                                    // For now, just retry
-                                    // sel_step <= 6'd49;
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
                                 end
                                 clear_rx_buffer <= 1;
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
                     end
@@ -635,20 +721,27 @@ always @(posedge clk or negedge rst_n) begin
                     6'd51: begin
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
-                                if ((rx_data - "0") > config_max_dim || (rx_data - "0") == 0) begin
+                                if (input_accum * 10 + (rx_data - "0") <= config_max_dim) begin
+                                    input_accum <= input_accum * 10 + (rx_data - "0");
+                                end else begin
                                     error_code <= `ERR_DIM_RANGE;
                                     if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
-                                end else begin
+                                    input_accum <= 0;
+                                end
+                            end else if (rx_data == 8'h20) begin // Space
+                                if (input_accum > 0 && input_accum <= config_max_dim) begin
                                     target_m <= target_n; // Op2 M = Op1 N
-                                    target_n <= rx_data - "0"; // Op2 N = P
+                                    target_n <= input_accum[3:0]; // Op2 N = P
                                     sel_step <= 6'd52;
                                     scan_slot <= 0;
                                     match_idx <= 1;
+                                    input_accum <= 0;
                                     error_code <= `ERR_NONE;
+                                end else begin
+                                    error_code <= `ERR_DIM_RANGE;
+                                    if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                                    input_accum <= 0;
                                 end
-                            end else begin
-                                error_code <= `ERR_DIM_RANGE;
-                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
                     end
@@ -674,25 +767,28 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     6'd54: begin // Print Index
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= match_idx + "0"; 
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 6'd55; 
                         end
                     end
 
                     6'd55: begin // Send Newline after Index
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0D; // CR
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 6'd56;
                         end
                     end
 
                     6'd56: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 6'd57;
                         end
                     end
@@ -709,21 +805,22 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     6'd59: begin // Send Element
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             if (mem_rd_data >= 100) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
-                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd60; end
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd60; end
                                 endcase
                             end else if (mem_rd_data >= 10) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd60; end
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd60; end
                                 endcase
                             end else begin
                                 tx_data <= mem_rd_data + "0";
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 sel_step <= 6'd60;
                             end
                         end
@@ -731,15 +828,17 @@ always @(posedge clk or negedge rst_n) begin
 
                     6'd60: begin // Check Row End
                         if (print_c == target_n - 1) begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= 8'h0D; // CR
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  sel_step <= 6'd61;
                              end
                         end else begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= " "; // Space between elements
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  print_c <= print_c + 1;
                                  sel_step <= 6'd57;
                              end
@@ -747,9 +846,10 @@ always @(posedge clk or negedge rst_n) begin
                     end
 
                     6'd61: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == target_m - 1) begin
                                 match_idx <= match_idx + 1;
@@ -860,21 +960,22 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     6'd29: begin // Send Element
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             if (mem_rd_data >= 100) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
-                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd30; end
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd30; end
                                 endcase
                             end else if (mem_rd_data >= 10) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd30; end
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd30; end
                                 endcase
                             end else begin
                                 tx_data <= mem_rd_data + "0";
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 sel_step <= 6'd30;
                             end
                         end
@@ -882,15 +983,17 @@ always @(posedge clk or negedge rst_n) begin
 
                     6'd30: begin // Check Row End
                         if (print_c == op1_n - 1) begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= 8'h0D; // CR
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  sel_step <= 6'd31;
                              end
                         end else begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= " "; // Space
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  print_c <= print_c + 1;
                                  sel_step <= 6'd27;
                              end
@@ -898,9 +1001,10 @@ always @(posedge clk or negedge rst_n) begin
                     end
 
                     6'd31: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == op1_m - 1) begin
                                 // Op1 Done. Next?
@@ -939,21 +1043,22 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     6'd36: begin // Send Element
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             if (mem_rd_data >= 100) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
-                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd37; end
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd37; end
                                 endcase
                             end else if (mem_rd_data >= 10) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; sel_step <= 6'd37; end
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 6'd37; end
                                 endcase
                             end else begin
                                 tx_data <= mem_rd_data + "0";
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 sel_step <= 6'd37;
                             end
                         end
@@ -961,15 +1066,17 @@ always @(posedge clk or negedge rst_n) begin
 
                     6'd37: begin // Check Row End
                         if (print_c == target_n - 1) begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= 8'h0D; // CR
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  sel_step <= 6'd38;
                              end
                         end else begin
-                             if (!tx_busy) begin
+                             if (!tx_busy && !tx_pending) begin
                                  tx_data <= " "; // Space
                                  tx_start <= 1;
+                                 tx_pending <= 1;
                                  print_c <= print_c + 1;
                                  sel_step <= 6'd34;
                              end
@@ -977,12 +1084,13 @@ always @(posedge clk or negedge rst_n) begin
                     end
 
                     6'd38: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == target_m - 1) begin
-                                // Op2 Done.
+                                // Op2 Done, go to Confirm state
                                 sel_step <= 6'd20;
                             end else begin
                                 print_r <= print_r + 1;
@@ -993,25 +1101,28 @@ always @(posedge clk or negedge rst_n) begin
 
                     // --- Print Scalar ---
                     6'd39: begin 
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= scalar_val + "0";
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 6'd40;
                         end
                     end
                     
                     6'd40: begin
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0D;
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 6'd41;
                         end
                     end
                     
                     6'd41: begin
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A;
                             tx_start <= 1;
+                            tx_pending <= 1;
                             sel_step <= 6'd20;
                         end
                     end
@@ -1025,6 +1136,122 @@ always @(posedge clk or negedge rst_n) begin
 
                     6'd43: begin // Wait for !rx_done before Scalar
                         if (!rx_done) sel_step <= 6'd19;
+                    end
+
+                    // ==========================================
+                    // Convolution: Select 3x3 Kernel
+                    // ==========================================
+                    6'd70: begin // Wait for rx_done to clear before listing kernels
+                        if (!rx_done) sel_step <= 6'd62;
+                    end
+                    
+                    6'd62: begin // Init: List all 3x3 matrices
+                        target_m <= 5'd3;
+                        target_n <= 5'd3;
+                        scan_slot <= 0;
+                        match_idx <= 1;
+                        sel_step <= 6'd63;
+                    end
+                    
+                    6'd63: begin // Query slot for 3x3 kernel
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 6'd64;
+                    end
+                    
+                    6'd64: begin // Check if 3x3 and print
+                        if (query_valid && query_m == 5'd3 && query_n == 5'd3) begin
+                            print_addr <= query_addr;
+                            print_r <= 0;
+                            print_c <= 0;
+                            sel_step <= 6'd65; // Print index
+                        end else begin
+                            if (scan_slot == 15) sel_step <= 6'd67; // Done listing, wait selection
+                            else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 6'd63;
+                            end
+                        end
+                    end
+                    
+                    6'd65: begin // Print kernel index
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= match_idx + "0"; 
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            sel_step <= 6'd66;
+                        end
+                    end
+                    
+                    6'd66: begin // Send CR after kernel index
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0D;
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            sel_step <= 6'd71;
+                        end
+                    end
+                    
+                    6'd71: begin // Send LF, then continue listing
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0A;
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            match_idx <= match_idx + 1;
+                            if (scan_slot == 15) sel_step <= 6'd67;
+                            else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 6'd63;
+                            end
+                        end
+                    end
+                    
+                    6'd67: begin // Wait for kernel selection
+                        if (rx_done) begin
+                            if (rx_data >= "0" && rx_data <= "9") begin
+                                user_sel_idx <= rx_data - "0";
+                                scan_slot <= 0;
+                                match_idx <= 1;
+                                sel_step <= 6'd68;
+                                error_code <= `ERR_NONE;
+                            end else begin
+                                error_code <= `ERR_VALUE_RANGE;
+                                if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
+                            end
+                        end
+                    end
+                    
+                    6'd68: begin // Find kernel slot
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 6'd69;
+                    end
+                    
+                    6'd69: begin // Match kernel
+                        if (query_valid && query_m == 5'd3 && query_n == 5'd3) begin
+                            if (match_idx == user_sel_idx) begin
+                                op2_slot <= scan_slot[3:0];
+                                // Restore image dimensions for result
+                                target_m <= op1_m;
+                                target_n <= op1_n;
+                                sel_step <= 6'd25; // Print Op1 then Op2 (kernel)
+                            end else begin
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) begin
+                                    scan_slot <= 0;
+                                    sel_step <= 6'd67;
+                                end else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 6'd68;
+                                end
+                            end
+                        end else begin
+                            if (scan_slot == 15) begin
+                                scan_slot <= 0;
+                                sel_step <= 6'd67;
+                            end else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 6'd68;
+                            end
+                        end
                     end
                     
                 endcase
@@ -1086,6 +1313,12 @@ always @(posedge clk or negedge rst_n) begin
                         if (selected_op_type == OP_TRANSPOSE) begin
                             commit_m <= target_n;
                             commit_n <= target_m;
+                        end else if (selected_op_type == OP_MUL) begin
+                            commit_m <= op1_m;
+                            commit_n <= target_n;
+                        end else if (selected_op_type == OP_CONV) begin
+                            commit_m <= op1_m;
+                            commit_n <= op1_n;
                         end else begin
                             commit_m <= target_m;
                             commit_n <= target_n;
@@ -1104,6 +1337,12 @@ always @(posedge clk or negedge rst_n) begin
                         if (selected_op_type == OP_TRANSPOSE) begin
                             iter_m <= target_n; 
                             iter_n <= target_m; 
+                        end else if (selected_op_type == OP_MUL) begin
+                            iter_m <= op1_m;
+                            iter_n <= target_n;
+                        end else if (selected_op_type == OP_CONV) begin
+                            iter_m <= op1_m;
+                            iter_n <= op1_n;
                         end else begin
                             iter_m <= target_m;
                             iter_n <= target_n;
@@ -1118,23 +1357,26 @@ always @(posedge clk or negedge rst_n) begin
             SEND_RESULT: begin
                 case (res_send_idx)
                     0: begin // Send Result Slot
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= res_slot + "0"; 
                             tx_start <= 1;
+                            tx_pending <= 1;
                             res_send_idx <= 1;
                         end
                     end
                     1: begin // Send CR
-                         if (!tx_busy) begin
+                         if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0D; 
                             tx_start <= 1;
+                            tx_pending <= 1;
                             res_send_idx <= 7;
                         end
                     end
                     7: begin // Send LF
-                         if (!tx_busy) begin
+                         if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; 
                             tx_start <= 1;
+                            tx_pending <= 1;
                             res_send_idx <= 2;
                         end
                     end
@@ -1149,45 +1391,49 @@ always @(posedge clk or negedge rst_n) begin
                         print_step <= 0;
                     end
                     4: begin // Send Data
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             if (mem_rd_data >= 100) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; print_step <= 2; end
-                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; res_send_idx <= 6; end
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; res_send_idx <= 6; end
                                 endcase
                             end else if (mem_rd_data >= 10) begin
                                 case (print_step)
-                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; print_step <= 1; end
-                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; print_step <= 0; res_send_idx <= 6; end
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; res_send_idx <= 6; end
                                 endcase
                             end else begin
                                 tx_data <= mem_rd_data + "0";
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 res_send_idx <= 6;
                             end
                         end
                     end
                     6: begin // Check Row End
                         if (print_c == iter_n - 1) begin
-                            if (!tx_busy) begin
+                            if (!tx_busy && !tx_pending) begin
                                 tx_data <= 8'h0D; // CR
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 res_send_idx <= 8;
                             end
                         end else begin
-                            if (!tx_busy) begin
+                            if (!tx_busy && !tx_pending) begin
                                 tx_data <= " "; // Space
                                 tx_start <= 1;
+                                tx_pending <= 1;
                                 print_c <= print_c + 1;
                                 res_send_idx <= 2; 
                             end
                         end
                     end
                     8: begin // Send LF
-                        if (!tx_busy) begin
+                        if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0A; // LF
                             tx_start <= 1;
+                            tx_pending <= 1;
                             print_c <= 0;
                             if (print_r == iter_m - 1) begin
                                 res_send_idx <= 5; 
