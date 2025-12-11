@@ -46,11 +46,4 @@ set_property PACKAGE_PIN G6 [get_ports {count_down_select[0]}]
 set_property PACKAGE_PIN E1 [get_ports {count_down_select[1]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {count_down_select[*]}]
 
-set_false_path -from [get_ports uart_rx]
-set_false_path -to [get_ports uart_tx]
-
-set_property CFGBVS VCCO [current_design]
-set_property CONFIG_VOLTAGE 3.3 [current_design]
-set_property RAM_STYLE block [get_cells -hierarchical *mem*]
-set_property RAM_STYLE block [get_cells -hierarchical *matrix_*]
 

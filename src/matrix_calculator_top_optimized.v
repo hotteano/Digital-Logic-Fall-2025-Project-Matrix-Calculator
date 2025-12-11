@@ -157,8 +157,8 @@ wire [`ELEMENT_WIDTH-1:0] mem_wr_data_input, mem_wr_data_generate;
 // ========================================
 // BRAM Memory Read Multiplexing (Port B)
 // ========================================
-wire mem_rd_en_input;
-wire [`BRAM_ADDR_WIDTH-1:0] mem_rd_addr_input;
+wire mem_rd_en_input, mem_rd_en_generate;
+wire [`BRAM_ADDR_WIDTH-1:0] mem_rd_addr_input, mem_rd_addr_generate;
 
 assign mem_a_en = mem_wr_en_input | mem_wr_en_generate | mem_wr_en_compute | mem_rd_en_display | mem_rd_en_compute;
 assign mem_a_we = mem_wr_en_input | mem_wr_en_generate | mem_wr_en_compute;
@@ -171,8 +171,8 @@ assign mem_a_din = mem_wr_en_input ? mem_wr_data_input :
                    mem_wr_en_generate ? mem_wr_data_generate : mem_wr_data_compute;
 
 // Port B is currently used only by Input Mode for verification
-assign mem_b_en = mem_rd_en_input;
-assign mem_b_addr = mem_rd_addr_input;
+assign mem_b_en = mem_rd_en_input | mem_rd_en_generate;
+assign mem_b_addr = mem_rd_addr_input ? mem_rd_addr_input : mem_rd_addr_generate;
 
 // ========================================
 // BRAM Memory Read Multiplexing
@@ -498,7 +498,11 @@ generate_mode generate_mode_inst (
     .mem_wr_data(mem_wr_data_generate),
     .error_code(error_code_generate),
     .sub_state(sub_state_generate),
-    .timeout_reset(error_timeout)
+    .timeout_reset(error_timeout), 
+    .mem_rd_en(mem_rd_en_generate),
+    .mem_rd_addr(mem_rd_addr_generate), 
+    .mem_rd_data(mem_b_dout),
+    .config_matrices_per_size(config_matrices_per_size)
 );
 
 // ========================================
@@ -580,7 +584,8 @@ compute_mode compute_mode_inst (
         
         .error_code(error_code_compute),
         .sub_state(sub_state_compute),
-        .timeout_reset(error_timeout)
+        .timeout_reset(error_timeout), 
+        .random_number(random_value)
     );
 
 // ========================================
