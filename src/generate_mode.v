@@ -281,10 +281,7 @@ always @(posedge clk or negedge rst_n) begin
                 if (!tx_busy) begin
                     tx_data <= (latched_val < 10) ? (latched_val + "0") : (latched_val - 10 + "A");
                     tx_start <= 1'b1;
-                    if (col_count == gen_n - 1)
-                        sub_state <= SEND_NEWLINE;  // Last number in row: go directly to newline
-                    else
-                        sub_state <= SEND_SPACE;
+                    sub_state <= SEND_SPACE;
                 end
             end
 
@@ -292,12 +289,16 @@ always @(posedge clk or negedge rst_n) begin
                 if (!tx_busy) begin
                     tx_data <= 8'h20; // Space
                     tx_start <= 1'b1;
-                    col_count <= col_count + 1'b1;
-                    gen_count <= gen_count + 1'b1;
-                    if (gen_count == (gen_m * gen_n) - 1)
-                        sub_state <= COMMIT;
-                    else
-                        sub_state <= GEN_LATCH;
+                    if (col_count == gen_n - 1) begin
+                        sub_state <= SEND_NEWLINE;
+                    end else begin
+                        col_count <= col_count + 1'b1;
+                        gen_count <= gen_count + 1'b1;
+                        if (gen_count == (gen_m * gen_n) - 1)
+                            sub_state <= COMMIT;
+                        else
+                            sub_state <= GEN_LATCH;
+                    end
                 end
             end
 
