@@ -387,12 +387,12 @@ always @(posedge clk or negedge rst_n) begin
                             iter_n <= 1;
                             sel_step <= 5'd1;
                         end else begin
-                            sel_step <= 5'd80; // Finish stats line
+                            sel_step <= 7'd80; // Finish stats line
                             input_accum <= 0;
                         end
                     end
                     
-                    5'd80: begin // Send newline after stats line
+                    7'd80: begin // Send newline after stats line
                         if (!tx_busy && !tx_pending) begin
                             case (print_step)
                                 0: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
@@ -610,12 +610,19 @@ always @(posedge clk or negedge rst_n) begin
                                     // For Matrix Mul, we need to select 2nd matrix with potentially different dims
                                     // Reset stats and go to stats phase for 2nd operand
                                     sel_step <= 6'd44; 
+                                end else if (selected_op_type == OP_ADD) begin
+                                    // For Add, 2nd operand has same dims as 1st
+                                    // Go to list matrices for Op2 selection
+                                    scan_slot <= 0;
+                                    match_idx <= 1;
+                                    sel_step <= 7'd62; // New state: list matrices for Add Op2
                                 end else if (selected_op_type == OP_CONV) begin
                                     // For Convolution, kernel is fixed 3x3
                                     // Wait for rx_done to clear, then go to select kernel
                                     sel_step <= 7'd70;
                                 end else begin
-                                    sel_step <= 6'd42; // Wait RX low then 16
+                                    // Default case (should not reach here)
+                                    sel_step <= 6'd16; 
                                 end
                             end else begin
                                 match_idx <= match_idx + 1;
@@ -754,12 +761,12 @@ always @(posedge clk or negedge rst_n) begin
                             iter_n <= 1;
                             sel_step <= 6'd45;
                         end else begin
-                            sel_step <= 6'd81; // Finish stats line for Op2
+                            sel_step <= 7'd81; // Finish stats line for Op2
                             input_accum <= 0;
                         end
                     end
                     
-                    6'd81: begin // Send newline after Op2 stats line
+                    7'd81: begin // Send newline after Op2 stats line
                         if (!tx_busy && !tx_pending) begin
                             case (print_step)
                                 0: begin tx_data <= 8'h0D; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
@@ -841,7 +848,7 @@ always @(posedge clk or negedge rst_n) begin
                             print_c <= 0;
                             sel_step <= 6'd54;
                         end else begin
-                            if (scan_slot == 15) sel_step <= 6'd42; // Go to Wait Sel 2 (reusing state 16 via 42)
+                            if (scan_slot == 15) sel_step <= 7'd85; // Wait for rx_done to clear before Sel 2
                             else begin
                                 scan_slot <= scan_slot + 1;
                                 sel_step <= 6'd52;
@@ -936,7 +943,7 @@ always @(posedge clk or negedge rst_n) begin
                             print_c <= 0;
                             if (print_r == target_m - 1) begin
                                 match_idx <= match_idx + 1;
-                                if (scan_slot == 15) sel_step <= 6'd42; // Go to Wait Sel 2
+                                if (scan_slot == 15) sel_step <= 7'd85; // Wait for rx_done to clear
                                 else begin
                                     scan_slot <= scan_slot + 1;
                                     sel_step <= 6'd52;
@@ -946,6 +953,10 @@ always @(posedge clk or negedge rst_n) begin
                                 sel_step <= 6'd57; 
                             end
                         end
+                    end
+
+                    7'd85: begin // Wait for rx_done to clear before Wait Sel 2 (Mul Op2)
+                        if (!rx_done) sel_step <= 6'd16;
                     end
                     
                     5'd16: begin // Wait Selection 2
@@ -969,9 +980,9 @@ always @(posedge clk or negedge rst_n) begin
                     end
                     
                     5'd18: begin
-                        // For add: same dims as target_m/target_n; for mul: rows must equal op1_n.
+                        // For add: same dims as target_m/target_n; for mul: rows must equal op1_n, cols must equal target_n.
                         if (query_valid && ((selected_op_type == OP_ADD && query_m == target_m && query_n == target_n) ||
-                                            (selected_op_type == OP_MUL && query_m == op1_n))) begin
+                                            (selected_op_type == OP_MUL && query_m == op1_n && query_n == target_n))) begin
                             if (match_idx == user_sel_idx) begin
                                 op2_slot <= scan_slot[3:0];
                                 sel_step <= 6'd25; // Print Op1 then Op2
@@ -1007,6 +1018,132 @@ always @(posedge clk or negedge rst_n) begin
                                 if (!tx_busy) begin tx_data <= "!"; tx_start <= 1'b1; end
                             end
                         end
+                    end
+
+                    // ==========================================
+                    // NEW: List Matrices for Add Op2 (same dims as Op1)
+                    // ==========================================
+                    7'd62: begin // List Matrices for Add Op2
+                        query_slot <= scan_slot[3:0];
+                        sel_step <= 7'd63;
+                    end
+                    
+                    7'd63: begin 
+                        if (query_valid && query_m == target_m && query_n == target_n) begin
+                            print_addr <= query_addr;
+                            print_r <= 0;
+                            print_c <= 0;
+                            sel_step <= 7'd64;
+                        end else begin
+                            if (scan_slot == 15) sel_step <= 7'd84; // Wait for rx_done to clear
+                            else begin
+                                scan_slot <= scan_slot + 1;
+                                sel_step <= 7'd62;
+                            end
+                        end
+                    end
+                    
+                    7'd64: begin // Print Index
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= match_idx + "0"; 
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            sel_step <= 7'd65; 
+                        end
+                    end
+
+                    7'd65: begin // Send CR after Index
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0D; // CR
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            sel_step <= 7'd66;
+                        end
+                    end
+
+                    7'd66: begin // Send LF
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            sel_step <= 7'd67;
+                        end
+                    end
+                    
+                    7'd67: begin // Print Matrix Content (Read BRAM)
+                        internal_rd_en <= 1;
+                        internal_rd_addr <= print_addr + (print_r * target_n) + print_c;
+                        sel_step <= 7'd68;
+                    end
+                    
+                    7'd68: begin // Wait read
+                        sel_step <= 7'd69;
+                        print_step <= 0;
+                    end
+                    
+                    7'd69: begin // Send Element
+                        if (!tx_busy && !tx_pending) begin
+                            if (mem_rd_data >= 100) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 100) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= ((mem_rd_data % 100) / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 2; end
+                                    2: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 7'd82; end
+                                endcase
+                            end else if (mem_rd_data >= 10) begin
+                                case (print_step)
+                                    0: begin tx_data <= (mem_rd_data / 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 1; end
+                                    1: begin tx_data <= (mem_rd_data % 10) + "0"; tx_start <= 1; tx_pending <= 1; print_step <= 0; sel_step <= 7'd82; end
+                                endcase
+                            end else begin
+                                tx_data <= mem_rd_data + "0";
+                                tx_start <= 1;
+                                tx_pending <= 1;
+                                sel_step <= 7'd82;
+                            end
+                        end
+                    end
+
+                    7'd82: begin // Check Row End (Add Op2)
+                        if (print_c == target_n - 1) begin
+                             if (!tx_busy && !tx_pending) begin
+                                 tx_data <= 8'h0D; // CR
+                                 tx_start <= 1;
+                                 tx_pending <= 1;
+                                 sel_step <= 7'd83;
+                             end
+                        end else begin
+                             if (!tx_busy && !tx_pending) begin
+                                 tx_data <= " "; // Space between elements
+                                 tx_start <= 1;
+                                 tx_pending <= 1;
+                                 print_c <= print_c + 1;
+                                 sel_step <= 7'd67;
+                             end
+                        end
+                    end
+
+                    7'd83: begin // Send LF (Add Op2)
+                        if (!tx_busy && !tx_pending) begin
+                            tx_data <= 8'h0A; // LF
+                            tx_start <= 1;
+                            tx_pending <= 1;
+                            print_c <= 0;
+                            if (print_r == target_m - 1) begin
+                                match_idx <= match_idx + 1;
+                                if (scan_slot == 15) sel_step <= 7'd84; // Wait for rx_done to clear
+                                else begin
+                                    scan_slot <= scan_slot + 1;
+                                    sel_step <= 7'd62;
+                                end
+                            end else begin
+                                print_r <= print_r + 1;
+                                sel_step <= 7'd67; 
+                            end
+                        end
+                    end
+
+                    7'd84: begin // Wait for rx_done to clear before Wait Sel 2 (Add Op2)
+                        if (!rx_done) sel_step <= 6'd16;
                     end
                     
                     5'd20: begin // Confirm
@@ -1215,9 +1352,9 @@ always @(posedge clk or negedge rst_n) begin
                     // ==========================================
                     // NEW: Wait for RX Done to Clear (Debounce)
                     // ==========================================
-                    6'd42: begin // Wait for !rx_done before Op2
-                        if (!rx_done) sel_step <= 6'd16;
-                    end
+                    // 6'd42: begin // Wait for !rx_done before Op2
+                    //     if (!rx_done) sel_step <= 6'd16;
+                    // end
 
                     6'd43: begin // Wait for !rx_done before Scalar
                         if (!rx_done) sel_step <= 6'd19;
@@ -1227,47 +1364,47 @@ always @(posedge clk or negedge rst_n) begin
                     // Convolution: Select 3x3 Kernel
                     // ==========================================
                     7'd70: begin // Wait for rx_done to clear before listing kernels
-                        if (!rx_done) sel_step <= 6'd62;
+                        if (!rx_done) sel_step <= 7'd90;
                     end
                     
-                    7'd62: begin // Init: List all 3x3 matrices
+                    7'd90: begin // Init: List all 3x3 matrices
                         target_m <= 5'd3;
                         target_n <= 5'd3;
                         scan_slot <= 0;
                         match_idx <= 1;
-                        sel_step <= 6'd63;
+                        sel_step <= 7'd91;
                     end
                     
-                    7'd63: begin // Query slot for 3x3 kernel
+                    7'd91: begin // Query slot for 3x3 kernel
                         query_slot <= scan_slot[3:0];
-                        sel_step <= 7'd64;
+                        sel_step <= 7'd92;
                     end
                     
-                    7'd64: begin // Check if 3x3 and print
+                    7'd92: begin // Check if 3x3 and print
                         if (query_valid && query_m == 5'd3 && query_n == 5'd3) begin
                             print_addr <= query_addr;
                             print_r <= 0;
                             print_c <= 0;
-                            sel_step <= 7'd65; // Print index
+                            sel_step <= 7'd93; // Print index
                         end else begin
-                            if (scan_slot == 15) sel_step <= 7'd67; // Done listing, wait selection
+                            if (scan_slot == 15) sel_step <= 7'd95; // Done listing, wait selection
                             else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 7'd63;
+                                sel_step <= 7'd91;
                             end
                         end
                     end
                     
-                    7'd65: begin // Print kernel index
+                    7'd93: begin // Print kernel index
                         if (!tx_busy && !tx_pending) begin
                             tx_data <= match_idx + "0"; 
                             tx_start <= 1;
                             tx_pending <= 1;
-                            sel_step <= 7'd66;
+                            sel_step <= 7'd94;
                         end
                     end
                     
-                    7'd66: begin // Send CR after kernel index
+                    7'd94: begin // Send CR after kernel index
                         if (!tx_busy && !tx_pending) begin
                             tx_data <= 8'h0D;
                             tx_start <= 1;
@@ -1347,10 +1484,10 @@ always @(posedge clk or negedge rst_n) begin
                             print_c <= 0;
                             if (print_r == 2) begin // Done printing this kernel
                                 match_idx <= match_idx + 1;
-                                if (scan_slot == 15) sel_step <= 7'd67; // Done listing all
+                                if (scan_slot == 15) sel_step <= 7'd95; // Done listing all
                                 else begin
                                     scan_slot <= scan_slot + 1;
-                                    sel_step <= 7'd63; // Next kernel
+                                    sel_step <= 7'd91; // Next kernel
                                 end
                             end else begin
                                 print_r <= print_r + 1;
@@ -1359,13 +1496,13 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    7'd67: begin // Wait for kernel selection
+                    7'd95: begin // Wait for kernel selection
                         if (rx_done) begin
                             if (rx_data >= "0" && rx_data <= "9") begin
                                 user_sel_idx <= rx_data - "0";
                                 scan_slot <= 0;
                                 match_idx <= 1;
-                                sel_step <= 7'd68;
+                                sel_step <= 7'd96;
                                 error_code <= `ERR_NONE;
                             end else begin
                                 error_code <= `ERR_VALUE_RANGE;
@@ -1374,12 +1511,12 @@ always @(posedge clk or negedge rst_n) begin
                         end
                     end
                     
-                    7'd68: begin // Find kernel slot
+                    7'd96: begin // Find kernel slot
                         query_slot <= scan_slot[3:0];
-                        sel_step <= 7'd69;
+                        sel_step <= 7'd97;
                     end
                     
-                    7'd69: begin // Match kernel
+                    7'd97: begin // Match kernel
                         if (query_valid && query_m == 5'd3 && query_n == 5'd3) begin
                             if (match_idx == user_sel_idx) begin
                                 op2_slot <= scan_slot[3:0];
@@ -1392,19 +1529,19 @@ always @(posedge clk or negedge rst_n) begin
                                 match_idx <= match_idx + 1;
                                 if (scan_slot == 15) begin
                                     scan_slot <= 0;
-                                    sel_step <= 7'd67;
+                                    sel_step <= 7'd95;
                                 end else begin
                                     scan_slot <= scan_slot + 1;
-                                    sel_step <= 7'd68;
+                                    sel_step <= 7'd96;
                                 end
                             end
                         end else begin
                             if (scan_slot == 15) begin
                                 scan_slot <= 0;
-                                sel_step <= 7'd67;
+                                sel_step <= 7'd95;
                             end else begin
                                 scan_slot <= scan_slot + 1;
-                                sel_step <= 7'd68;
+                                sel_step <= 7'd96;
                             end
                         end
                     end
