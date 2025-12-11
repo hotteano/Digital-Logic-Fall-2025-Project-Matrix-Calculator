@@ -1664,6 +1664,7 @@ always @(posedge clk or negedge rst_n) begin
                         res_send_idx <= 0;
                         sub_state <= SEND_RESULT;
                     end
+                    default: exec_state <= 0;
                 endcase
             end
 
@@ -1759,6 +1760,7 @@ always @(posedge clk or negedge rst_n) begin
                     5: begin // Done
                         sub_state <= DONE;
                     end
+                    default: res_send_idx <= 0;
                 endcase
             end
 
@@ -1767,7 +1769,8 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             default: sub_state <= IDLE;
-        endcase
+            endcase
+        end
     end else begin
         sub_state <= IDLE;
         btn_prev <= btn_confirm;

@@ -279,7 +279,7 @@ always @(posedge clk or negedge rst_n) begin
 
             SEND_VAL: begin
                 if (!tx_busy) begin
-                    tx_data <= (latched_val < 10) ? (latched_val + "0") : (latched_val - 10 + "A");
+                    tx_data <= latched_val + "0";
                     tx_start <= 1'b1;
                     sub_state <= SEND_SPACE;
                 end
@@ -287,26 +287,18 @@ always @(posedge clk or negedge rst_n) begin
 
             SEND_SPACE: begin
                 if (!tx_busy) begin
-                    tx_data <= 8'h20; // Space
-                    tx_start <= 1'b1;
                     if (col_count == gen_n - 1) begin
-                        sub_state <= SEND_NEWLINE;
+                        // 行末，发送换行
+                        tx_data <= 8'h0A; // Newline
+                        tx_start <= 1'b1;
+                        col_count <= 4'd0;
                     end else begin
+                        // 行中，发送空格
+                        tx_data <= 8'h20; // Space
+                        tx_start <= 1'b1;
                         col_count <= col_count + 1'b1;
-                        gen_count <= gen_count + 1'b1;
-                        if (gen_count == (gen_m * gen_n) - 1)
-                            sub_state <= COMMIT;
-                        else
-                            sub_state <= GEN_LATCH;
                     end
-                end
-            end
-
-            SEND_NEWLINE: begin
-                if (!tx_busy) begin
-                    tx_data <= 8'h0A; // Newline
-                    tx_start <= 1'b1;
-                    col_count <= 4'd0;
+                    
                     gen_count <= gen_count + 1'b1;
                     if (gen_count == (gen_m * gen_n) - 1)
                         sub_state <= COMMIT;
