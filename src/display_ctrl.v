@@ -111,8 +111,6 @@ module display_ctrl (
         endcase
     end
 
-    // 4. 扫描逻辑 (500Hz 左右足够，太慢会闪，太快会鬼影)
-    // 使用 1kHz 扫描
     reg [16:0] scan_cnt;
     always @(posedge clk or negedge rst_n) begin
         if(!rst_n) scan_cnt <= 0;
@@ -123,11 +121,11 @@ module display_ctrl (
         // scan_cnt[16] 翻转周期约为 1.3ms (100MHz时)
         case (scan_cnt[16])
             1'b0: begin
-                seg_select = 2'b10; // 选通左边的数码管 (Mode)
+                seg_select = 2'b10; 
                 seg_display = disp_data_mode;
             end
             1'b1: begin
-                seg_select = 2'b01; // 选通右边的数码管 (Op / Error)
+                seg_select = 2'b01; 
                 seg_display = disp_data_op;
             end
         endcase
