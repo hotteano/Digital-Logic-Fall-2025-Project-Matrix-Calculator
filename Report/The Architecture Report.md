@@ -5,6 +5,74 @@
 - Yan Jiang(12410337)
 - Dongsheng Hou(12410421)
 
+## 开发计划日程安排和实施情况，版本修改记录
+
+### 开发计划日程安排
+
+项目开发从初始规划开始，逐步实现各个模块。以下是主要阶段：
+
+- **初始阶段**：项目立项，确定基本架构，使用DRAM存储。
+- **中期阶段**：实现UART通信、按键消抖、基本模式切换。
+- **后期阶段**：实现矩阵输入、存储、计算功能，重构为BRAM存储。
+- **最终阶段**：完善所有计算模式、设置模式、错误处理、GUI框架。
+
+### 实施情况
+
+项目基本完成所有要求，并实现了若干bonus功能，包括卷积操作、倒计时错误恢复、随机生成等。GUI有框架但未完全连接。
+
+### 版本修改记录
+
+GitHub仓库链接：https://github.com/SUSTech-Digital-Logic-Project-Team/Digital-Logic-Fall-2025-Project-Matrix-Calculator
+
+提交记录（部分）：
+- ae04f1c Merge pull request #28 from hotteano/main
+- 7d797e5 Merge branch 'main' into main
+- 31489e5 update
+- 72e5d1f update
+- 38d3476 update
+- e5bf7ca update
+- e6a417d update
+- 15bd659 update
+- 6817a1a update
+- 679961f Okay this is the end
+- ... (更多提交见仓库)
+
+## 项目架构设计说明
+
+基于提交的架构设计文档，改进后的最终实现方案如下：
+
+（原有架构内容保持不变）
+
+## 输出对齐和参数配置设计思路
+
+### 输出对齐
+
+在显示和UART输出中，实现输出对齐通过在数字间添加空格，并在行列分隔时发送换行符。计数器维护当前行数据，当一行显示完毕时发送换行符（ASCII码10）。
+
+### 参数配置
+
+设置模式允许用户通过UART自定义参数，包括最大矩阵维度、最大数值、同一维度最大矩阵数量、倒计时设置。FPGA复位后参数初始化为默认值，用户可在运行时修改。与周边模块的关系：设置模式与顶层模块交互，更新config寄存器；顶层模块将这些参数传递给各子模块，如计算模式、生成模式等，用于限制输入范围和操作。
+
+## 应用开发
+
+项目实现了GUI应用（matrix_calculator_gui.py），用于PC端交互。应用开发部分由视频代替，视频需展示应用操作过程，介绍使用的技术栈（Python + Tkinter）和开发方式（脚本开发）。
+
+## 开源和AI使用以及思考总结
+
+### 开源声明
+
+本项目使用MIT协议开源，所有代码和文档可在GitHub仓库获取。
+
+### AI使用声明
+
+- 大量采用AI生成重复代码-人工调优debug模式，尤其在状态机设置、多路选择和模块连接中。
+- AI提供BRAM优化建议，有效避免LUT综合爆炸。
+- AI局限性：在复杂Verilog中，AI常在无关处过度检查，输出需人工review和debug。
+
+### 思考总结
+
+项目体现了数字逻辑设计从概念到实现的完整流程。使用BRAM优化显著提升性能，AI辅助加速开发但需人工把控质量。未来可进一步优化流水线和GUI连接。
+
 ## The INPUT and OUTPUT
 
 The input port and output port is listed as follows: 
